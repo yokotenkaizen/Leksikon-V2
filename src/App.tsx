@@ -296,17 +296,15 @@ export default function App() {
           <p className="text-[10px] font-sans uppercase tracking-[0.2em] opacity-60">Kamus Besar Bahasa Indonesia Digital</p>
         </div>
         <div className="flex gap-4 text-[11px] font-sans font-bold uppercase tracking-widest mt-6 md:mt-0 items-center">
-          {(showInstallBtn || isMobile) && (
-            <button 
-              onClick={handleInstallApp}
-              className="flex items-center gap-2 px-3 py-1.5 bg-[#1a1a1a] text-white rounded-sm hover:opacity-90 transition-all shadow-sm"
-              title="Pasang Aplikasi (PWA)"
-            >
-              <Download size={12} /> {showInstallBtn ? 'Pasang App' : 'Instal App'}
-            </button>
-          )}
           {user ? (
             <div className="flex items-center gap-4">
+              <button 
+                onClick={handleInstallApp}
+                className="flex items-center gap-2 px-3 py-1.5 border border-[#1a1a1a] text-[#1a1a1a] rounded-sm hover:bg-[#1a1a1a] hover:text-white transition-all"
+                title="Pasang Aplikasi (PWA)"
+              >
+                <Download size={12} /> Instal App
+              </button>
               <button 
                 onClick={() => setIsAdmin(!isAdmin)}
                 className={`flex items-center gap-2 px-3 py-1.5 border transition-all ${isAdmin ? 'bg-[#1a1a1a] text-white border-[#1a1a1a]' : 'border-gray-200 text-gray-400 hover:border-[#1a1a1a] hover:text-[#1a1a1a]'}`}
@@ -319,9 +317,18 @@ export default function App() {
               </button>
             </div>
           ) : (
-            <button onClick={handleLogin} className="flex items-center gap-1 text-gray-400 hover:text-[#1a1a1a]">
-              <LogIn size={12} /> Masuk Admin
-            </button>
+            <div className="flex items-center gap-4">
+              <button 
+                onClick={handleInstallApp}
+                className="flex items-center gap-2 px-3 py-1.5 border border-[#1a1a1a] text-[#1a1a1a] rounded-sm hover:bg-[#1a1a1a] hover:text-white transition-all"
+                title="Pasang Aplikasi (PWA)"
+              >
+                <Download size={12} /> Instal App
+              </button>
+              <button onClick={handleLogin} className="flex items-center gap-1 text-gray-400 hover:text-[#1a1a1a]">
+                <LogIn size={12} /> Masuk Admin
+              </button>
+            </div>
           )}
           <span className="opacity-40 hidden lg:inline">Mutakhir</span>
         </div>
