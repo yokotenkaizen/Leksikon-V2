@@ -1,0 +1,17 @@
+{
+  "name": "Leksikon Pintar",
+  "short_name": "Leksikon",
+  "description": "Kamus Bahasa Indonesia Digital Modern",
+  "start_url": "./",
+  "display": "standalone",
+  "background_color": "#fdfbf7",
+  "theme_color": "#1a1a1a",
+  "icons": [
+    {
+      "src": "leksikon_icon.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}
