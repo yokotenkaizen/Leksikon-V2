@@ -30,6 +30,7 @@ export default function App() {
   const [isProcessing, setIsProcessing] = useState(false);
   const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
   const [showInstallBtn, setShowInstallBtn] = useState(false);
+  const [isMobile, setIsMobile] = useState(false);
   
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -168,17 +169,35 @@ export default function App() {
   }, [history]);
 
   useEffect(() => {
+    // Cek apakah mobile
+    const checkMobile = () => {
+      return /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+    };
+    setIsMobile(checkMobile());
+
     const handler = (e: any) => {
       e.preventDefault();
       setDeferredPrompt(e);
       setShowInstallBtn(true);
     };
+    
     window.addEventListener('beforeinstallprompt', handler);
+    
+    // Jika PWA sudah terinstal
+    window.addEventListener('appinstalled', () => {
+      setShowInstallBtn(false);
+      setDeferredPrompt(null);
+    });
+
     return () => window.removeEventListener('beforeinstallprompt', handler);
   }, []);
 
   const handleInstallApp = async () => {
-    if (!deferredPrompt) return;
+    if (!deferredPrompt) {
+      // Jika prompt otomatis tidak tersedia, beri instruksi manual
+      alert("Untuk memasang aplikasi di Android:\n1. Klik ikon titik tiga di pojok kanan atas browser.\n2. Pilih 'Tambahkan ke Layar Utama' atau 'Instal Aplikasi'.");
+      return;
+    }
     deferredPrompt.prompt();
     const { outcome } = await deferredPrompt.userChoice;
     if (outcome === 'accepted') {
@@ -277,12 +296,13 @@ export default function App() {
           <p className="text-[10px] font-sans uppercase tracking-[0.2em] opacity-60">Kamus Besar Bahasa Indonesia Digital</p>
         </div>
         <div className="flex gap-4 text-[11px] font-sans font-bold uppercase tracking-widest mt-6 md:mt-0 items-center">
-          {showInstallBtn && (
+          {(showInstallBtn || isMobile) && (
             <button 
               onClick={handleInstallApp}
-              className="flex items-center gap-2 px-3 py-1.5 bg-[#1a1a1a] text-white rounded-sm hover:opacity-90 transition-all"
+              className="flex items-center gap-2 px-3 py-1.5 bg-[#1a1a1a] text-white rounded-sm hover:opacity-90 transition-all shadow-sm"
+              title="Pasang Aplikasi (PWA)"
             >
-              <Download size={12} /> Pasang App
+              <Download size={12} /> {showInstallBtn ? 'Pasang App' : 'Instal App'}
             </button>
           )}
           {user ? (
