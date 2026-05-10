@@ -1,36 +1,15 @@
 # Kamus Pintar (Leksikon Digital)
 
-Aplikasi Kamus Bahasa Indonesia modern yang ditenagai oleh AI (Gemini) untuk memberikan definisi bergaya KBBI dan contoh penggunaan kalimat.
+Aplikasi Kamus Bahasa Indonesia modern yang ditenagai oleh AI (Gemini).
 
-## Cara Sinkronisasi ke GitHub
+## Cara Sinkronisasi dan Akses Langsung
+Aplikasi ini sudah dikonfigurasi untuk **Deployment Otomatis**. Anda tidak perlu menggunakan terminal.
 
-1. Klik menu **Settings** (ikon gerigi) di pojok kiri bawah AI Studio.
-2. Pilih **Export to GitHub**.
-3. Hubungkan akun GitHub Anda dan buat repositori baru.
+1.  **Ekspor ke GitHub**: Klik ikon `Settings` (gerigi) di kiri bawah aplikasi ini -> `Export to GitHub`.
+2.  **Tunggu Proses**: Setelah di-ekspor, GitHub akan otomatis menjalankan "Action" untuk membangun website Anda (cek tab `Actions` di repositori GitHub Anda).
+3.  **Aktifkan Pages**: Jika belum aktif otomatis, buka `Settings` -> `Pages` di GitHub, lalu pilih branch `gh-pages` sebagai sumber utama.
+4.  **Selesai**: Website Anda akan tersedia di link `https://username.github.io/nama-repo/`.
 
-## Cara Deploy ke GitHub Pages
-
-Setelah kode Anda berada di GitHub:
-
-1. Buka terminal di komputer lokal Anda (setelah melakukan `git clone`).
-2. Jalankan perintah:
-   ```bash
-   npm install
-   ```
-3. Bangun dan deploy aplikasi:
-   ```bash
-   npm run deploy
-   ```
-4. Di GitHub, buka repositori Anda > **Settings** > **Pages**.
-5. Pastikan sumber (Source) diatur ke branch `gh-pages`.
-
-## Catatan Penting Mengenai Keamanan
-Karena aplikasi ini adalah *Client-Side SPA*, API Key Gemini Anda akan ikut ter-bundle di dalam file JavaScript yang didistribusikan. 
-- Jika repositori Anda **Publik**, API Key Anda akan terlihat oleh publik.
-- Disarankan untuk membatasi penggunaan API Key di Google Cloud Console (API Restrictions) hanya untuk domain GitHub Pages Anda.
-
-## Teknologi
-- React + Vite
-- Tailwind CSS (Editorial Aesthetic)
-- Google Gemini API
-- Framer Motion
+## Catatan Penting
+- **API Key**: Kunci API Gemini Anda disuntikkan saat proses build. Jika Anda mengubah kunci di AI Studio, lakukan ekspor ulang ke GitHub untuk memperbarui website yang live.
+- **Tanpa Terminal**: Semua proses build dilakukan oleh server GitHub (GitHub Actions).
