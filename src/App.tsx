@@ -389,7 +389,7 @@ export default function App() {
                   Jelajahi kekayaan kosakata Indonesia dengan definisi akurat dan contoh penggunaan yang tepat.
                 </p>
                 <div className="mt-8 text-[9px] font-sans font-bold uppercase tracking-widest opacity-30">
-                  Didukung oleh Kecerdasan Buatan
+                  Sistem Basis Data Leksikon
                 </div>
               </div>
             )}
