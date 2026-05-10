@@ -28,6 +28,8 @@ export default function App() {
   const [history, setHistory] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
+  const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
+  const [showInstallBtn, setShowInstallBtn] = useState(false);
   
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -165,6 +167,26 @@ export default function App() {
     localStorage.setItem('kamus_history', JSON.stringify(history));
   }, [history]);
 
+  useEffect(() => {
+    const handler = (e: any) => {
+      e.preventDefault();
+      setDeferredPrompt(e);
+      setShowInstallBtn(true);
+    };
+    window.addEventListener('beforeinstallprompt', handler);
+    return () => window.removeEventListener('beforeinstallprompt', handler);
+  }, []);
+
+  const handleInstallApp = async () => {
+    if (!deferredPrompt) return;
+    deferredPrompt.prompt();
+    const { outcome } = await deferredPrompt.userChoice;
+    if (outcome === 'accepted') {
+      setShowInstallBtn(false);
+    }
+    setDeferredPrompt(null);
+  };
+
   const handleSearch = (query: string = searchQuery) => {
     const trimmedQuery = query.trim().toLowerCase();
     if (!trimmedQuery) return;
@@ -255,6 +277,14 @@ export default function App() {
           <p className="text-[10px] font-sans uppercase tracking-[0.2em] opacity-60">Kamus Besar Bahasa Indonesia Digital</p>
         </div>
         <div className="flex gap-4 text-[11px] font-sans font-bold uppercase tracking-widest mt-6 md:mt-0 items-center">
+          {showInstallBtn && (
+            <button 
+              onClick={handleInstallApp}
+              className="flex items-center gap-2 px-3 py-1.5 bg-[#1a1a1a] text-white rounded-sm hover:opacity-90 transition-all"
+            >
+              <Download size={12} /> Pasang App
+            </button>
+          )}
           {user ? (
             <div className="flex items-center gap-4">
               <button 
