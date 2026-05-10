@@ -1,0 +1,52 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Helper functions
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isEmailVerified() {
+      return request.auth.token.email_verified == true;
+    }
+
+    function isAdmin() {
+      return isSignedIn() && request.auth.token.email == 'yokotenkaizen@gmail.com';
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function isValidWord(data) {
+      return data.word is string && data.word.size() > 0 && data.word.size() <= 200
+          && data.category is string && data.category.size() > 0 && data.category.size() <= 100
+          && data.definition is string && data.definition.size() > 0 && data.definition.size() <= 3000
+          && data.examples is list && data.examples.size() <= 20;
+    }
+
+    // Default deny
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Words collection
+    match /words/{wordId} {
+      // Siapa pun bisa membaca dan mencari kata
+      allow get: if true;
+      allow list: if true;
+      
+      // Hanya admin dengan email terdaftar yang bisa mengubah database
+      allow create: if isAdmin() 
+                    && isValidId(wordId)
+                    && isValidWord(request.resource.data)
+                    && (request.resource.data.word.toLower() == wordId || wordId.size() > 0);
+                    
+      allow update: if isAdmin() 
+                    && isValidWord(request.resource.data)
+                    && (request.resource.data.word.toLower() == wordId || true);
+                    
+      allow delete: if isAdmin();
+    }
+  }
+}

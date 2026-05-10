@@ -1,6 +1,6 @@
 {
   "name": "Kamus Pintar",
-  "description": "Aplikasi kamus bahasa Indonesia yang menyediakan definisi kata sesuai gaya KBBI dan contoh penggunaan dalam kalimat.",
+  "description": "Kamus Bahasa Indonesia digital dengan basis data yang dapat dikelola secara mandiri, menyediakan definisi gaya KBBI dan contoh penggunaan kalimat.",
   "requestFramePermissions": [],
   "majorCapabilities": []
 }

@@ -1,0 +1,27 @@
+{
+  "entities": {
+    "Word": {
+      "title": "Word Definition",
+      "description": "A single word entry with its category, definition, and usage examples.",
+      "type": "object",
+      "properties": {
+        "word": { "type": "string", "description": "The word itself" },
+        "category": { "type": "string", "description": "Part of speech (e.g., Nomina, Verba)" },
+        "definition": { "type": "string", "description": "The lexical definition" },
+        "examples": { 
+          "type": "array", 
+          "items": { "type": "string" },
+          "description": "List of usage examples"
+        },
+        "updatedAt": { "type": "string", "format": "date-time", "description": "Last modified timestamp" }
+      },
+      "required": ["word", "category", "definition", "examples"]
+    }
+  },
+  "firestore": {
+    "/words/{wordId}": {
+      "schema": "Word",
+      "description": "Collection of dictionary words."
+    }
+  }
+}
