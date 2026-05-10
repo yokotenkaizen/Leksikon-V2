@@ -1,20 +1,36 @@
-<div align="center">
-<img width="1200" height="475" alt="GHBanner" src="https://github.com/user-attachments/assets/0aa67016-6eaf-458a-adb2-6e31a0763ed6" />
-</div>
+# Kamus Pintar (Leksikon Digital)
 
-# Run and deploy your AI Studio app
+Aplikasi Kamus Bahasa Indonesia modern yang ditenagai oleh AI (Gemini) untuk memberikan definisi bergaya KBBI dan contoh penggunaan kalimat.
 
-This contains everything you need to run your app locally.
+## Cara Sinkronisasi ke GitHub
 
-View your app in AI Studio: https://ai.studio/apps/0b76b4d0-4aa8-4e9c-a280-3569de0b446a
+1. Klik menu **Settings** (ikon gerigi) di pojok kiri bawah AI Studio.
+2. Pilih **Export to GitHub**.
+3. Hubungkan akun GitHub Anda dan buat repositori baru.
 
-## Run Locally
+## Cara Deploy ke GitHub Pages
 
-**Prerequisites:**  Node.js
+Setelah kode Anda berada di GitHub:
 
+1. Buka terminal di komputer lokal Anda (setelah melakukan `git clone`).
+2. Jalankan perintah:
+   ```bash
+   npm install
+   ```
+3. Bangun dan deploy aplikasi:
+   ```bash
+   npm run deploy
+   ```
+4. Di GitHub, buka repositori Anda > **Settings** > **Pages**.
+5. Pastikan sumber (Source) diatur ke branch `gh-pages`.
 
-1. Install dependencies:
-   `npm install`
-2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
-3. Run the app:
-   `npm run dev`
+## Catatan Penting Mengenai Keamanan
+Karena aplikasi ini adalah *Client-Side SPA*, API Key Gemini Anda akan ikut ter-bundle di dalam file JavaScript yang didistribusikan. 
+- Jika repositori Anda **Publik**, API Key Anda akan terlihat oleh publik.
+- Disarankan untuk membatasi penggunaan API Key di Google Cloud Console (API Restrictions) hanya untuk domain GitHub Pages Anda.
+
+## Teknologi
+- React + Vite
+- Tailwind CSS (Editorial Aesthetic)
+- Google Gemini API
+- Framer Motion
