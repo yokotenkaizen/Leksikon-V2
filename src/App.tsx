@@ -19,6 +19,14 @@ export default function App() {
   const [result, setResult] = useState<WordDefinition | null>(null);
   const [history, setHistory] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [apiKeyMissing, setApiKeyMissing] = useState(false);
+
+  // Check for API Key on mount
+  useEffect(() => {
+    if (!process.env.GEMINI_API_KEY || process.env.GEMINI_API_KEY === '') {
+      setApiKeyMissing(true);
+    }
+  }, []);
 
   // Load history from localStorage on mount
   useEffect(() => {
@@ -154,6 +162,29 @@ export default function App() {
         {/* Right Column: Definition View */}
         <div className="md:col-span-8">
           <AnimatePresence mode="wait">
+            {apiKeyMissing && !result && (
+              <motion.div 
+                key="api-missing"
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                className="bg-amber-50 border border-amber-200 p-8 rounded-sm mb-12 shadow-[10px_10px_0px_#fef3c7]"
+              >
+                <h3 className="font-sans font-bold text-xs uppercase tracking-widest text-amber-900 mb-4 flex items-center gap-2">
+                  <Info size={14} /> Konfigurasi Diperlukan
+                </h3>
+                <p className="text-amber-800 font-serif text-lg leading-relaxed mb-6">
+                  Aplikasi belum terhubung ke Google Gemini. Anda perlu menambahkan <code className="bg-amber-100 px-1 font-sans font-bold text-sm">GEMINI_API_KEY</code> ke dalam <strong>GitHub Secrets</strong> agar aplikasi dapat berfungsi.
+                </p>
+                <ol className="text-amber-800 text-[11px] font-sans space-y-2 list-decimal pl-4 leading-snug">
+                  <li>Buka repositori Anda di GitHub.</li>
+                  <li>Ke <strong>Settings</strong> → <strong>Secrets and variables</strong> → <strong>Actions</strong>.</li>
+                  <li>Klik <strong>New repository secret</strong>.</li>
+                  <li>Nama: <strong>GEMINI_API_KEY</strong>, Value: (Salin dari AI Studio).</li>
+                  <li>Lakukan <strong>Re-run all jobs</strong> di tab <strong>Actions</strong>.</li>
+                </ol>
+              </motion.div>
+            )}
+
             {error ? (
               <motion.div 
                 key="error"
