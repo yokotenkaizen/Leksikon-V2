@@ -1,6 +1,6 @@
 {
   "name": "Leksikon",
   "description": "Kamus Besar Bahasa Indonesia Digital Modern dengan fitur notifikasi harian, manajemen kata, dan pencarian liris.",
-  "requestFramePermissions": ["geolocation"],
+  "requestFramePermissions": [],
   "majorCapabilities": []
 }

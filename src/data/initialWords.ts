@@ -1,13 +1,14 @@
 export interface WordEntry {
   word: string;
   category: string;
+  etymology?: string;
   definition: string;
   examples: string[];
 }
 
 export const initialWords: WordEntry[] = [
-  { "word": "Abjad", "category": "Nomina", "definition": "Kumpulan huruf dalam suatu bahasa.", "examples": ["Anak-anak mulai belajar menghafal abjad sejak dini.", "Urutan nama siswa disusun berdasarkan abjad."] },
-  { "word": "Amanah", "category": "Nomina", "definition": "Sesuatu yang dititipkan kepada orang lain; pesan yang harus disampaikan.", "examples": ["Pemimpin sejati harus menjaga amanah rakyat.", "Janganlah mengkhianati amanah yang telah diberikan."] },
+  { "word": "Abjad", "category": "Nomina", "etymology": "Dari bahasa Arab 'abjad'.", "definition": "Kumpulan huruf dalam suatu bahasa.", "examples": ["Anak-anak mulai belajar menghafal abjad sejak dini.", "Urutan nama siswa disusun berdasarkan abjad."] },
+  { "word": "Amanah", "category": "Nomina", "etymology": "Dari bahasa Arab 'amana'.", "definition": "Sesuatu yang dititipkan kepada orang lain; pesan yang harus disampaikan.", "examples": ["Pemimpin sejati harus menjaga amanah rakyat.", "Janganlah mengkhianati amanah yang telah diberikan."] },
   { "word": "Apresiasi", "category": "Nomina", "definition": "Penghargaan atau penilaian positif terhadap sesuatu.", "examples": ["Pemerintah memberikan apresiasi kepada atlet yang berprestasi.", "Apresiasi seni sangat penting untuk perkembangan kreativitas."] },
   { "word": "Bahari", "category": "Adjektiva", "definition": "Segala sesuatu yang berhubungan dengan laut.", "examples": ["Indonesia memiliki kekayaan bahari yang sangat melimpah.", "Wisata bahari di Raja Ampat sangat mendunia."] },
   { "word": "Bakti", "category": "Nomina", "definition": "Tunduk dan hormat; perbuatan yang menyatakan setia.", "examples": ["Seorang anak harus menunjukkan bakti kepada orang tuanya.", "Bakti sosial ini bertujuan untuk membantu korban bencana."] },

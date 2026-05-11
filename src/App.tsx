@@ -9,7 +9,7 @@
  */
 
 import React, { useState, useEffect, useRef } from 'react';
-import { Search, History, BookOpen, Trash2, ArrowRight, Info, Plus, Edit2, X, Save, Settings, LogIn, LogOut, Upload, Download, FileSpreadsheet, Loader2, Bell, BellOff, MapPin, Volume2, VolumeX } from 'lucide-react';
+import { Search, History, BookOpen, Trash2, ArrowRight, Info, Plus, Edit2, X, Save, Settings, LogIn, LogOut, Upload, Download, FileSpreadsheet, Loader2, Bell, BellOff, Volume2, VolumeX } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import * as XLSX from 'xlsx';
 import { initialWords, type WordEntry } from './data/initialWords.ts';
@@ -34,15 +34,17 @@ export default function App() {
   const [loginCreds, setLoginCreds] = useState({ email: '', password: '' });
   const [loginError, setLoginError] = useState<string | null>(null);
   const [notificationsEnabled, setNotificationsEnabled] = useState(false);
-  const [locationInfo, setLocationInfo] = useState<string | null>(null);
-  const [isLoadingLocation, setIsLoadingLocation] = useState(false);
   const [isSpeaking, setIsSpeaking] = useState(false);
+  const [isOffline, setIsOffline] = useState(!navigator.onLine);
+  const [lastUpload, setLastUpload] = useState<{timestamp: string, count: number} | null>(null);
   
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Admin Editing State
   const [isEditing, setIsEditing] = useState(false);
-  const [editForm, setEditForm] = useState<WordEntry>({ word: '', category: 'Nomina', definition: '', examples: ['', ''] });
+  const [editForm, setEditForm] = useState<WordEntry>({ word: '', category: 'Nomina', etymology: '', definition: '', examples: ['', ''] });
+  const [suggestions, setSuggestions] = useState<WordEntry[]>([]);
+  const [showSuggestions, setShowSuggestions] = useState(false);
 
   // Auth Helper (Local)
   const verifyAdmin = (email: string, pass: string) => {
@@ -71,34 +73,23 @@ export default function App() {
       setNotificationsEnabled(true);
     }
 
-    // Geolocation detection
-    if ("geolocation" in navigator) {
-      setIsLoadingLocation(true);
-      navigator.geolocation.getCurrentPosition(
-        async (position) => {
-          const { latitude, longitude } = position.coords;
-          try {
-            // Using OSM Nominatim (Free) - User agent header is good practice but fetch in browser doesn't allow setting it easily
-            // We'll just use a simple fetch
-            const response = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${latitude}&lon=${longitude}&zoom=10`);
-            const data = await response.json();
-            const city = data.address.city || data.address.town || data.address.village || data.address.city_district || data.address.state || "Lokasi Anda";
-            setLocationInfo(city);
-          } catch (err) {
-            console.error("Geocoding error:", err);
-            // Fallback to coordinates
-            setLocationInfo(`${latitude.toFixed(2)}°, ${longitude.toFixed(2)}°`);
-          } finally {
-            setIsLoadingLocation(false);
-          }
-        },
-        (error) => {
-          console.error("Geolocation access error:", error);
-          setIsLoadingLocation(false);
-        },
-        { enableHighAccuracy: false, timeout: 10000, maximumAge: 3600000 }
-      );
+    const savedUpload = localStorage.getItem('leksikon_last_upload');
+    if (savedUpload) {
+      try {
+        setLastUpload(JSON.parse(savedUpload));
+      } catch (e) {}
     }
+
+    // Offline detection
+    const handleOnline = () => setIsOffline(false);
+    const handleOffline = () => setIsOffline(true);
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
   }, []);
 
   // Speech Voices Pre-loading & Synthesis Cleanup
@@ -207,15 +198,48 @@ export default function App() {
   // Excel Export Template
   const downloadTemplate = () => {
     const templateData = [
-      ["Kata", "Kategori", "Definisi", "Contoh Kalimat"],
-      ["Integritas", "Nomina", "Mutu, sifat, atau keadaan yang menunjukkan kesatuan yang utuh sehingga memiliki potensi dan kemampuan yang memancarkan kewibawaan; kejujuran.", "Setiap pemimpin harus memiliki integritas yang tinggi.;Integritas bangsa harus tetap terjaga."],
-      ["Resiliensi", "Nomina", "Kemampuan untuk beradaptasi dan tetap teguh dalam situasi sulit; daya kenyal; daya lentur.", "Resiliensi masyarakat pesisir diuji saat menghadapi banjir rob.;Pendidikan karakter membangun resiliensi mental."]
+      ["Kata", "Kategori", "Etimologi", "Definisi", "Contoh Kalimat"],
+      ["Integritas", "Nomina", "Dari bahasa Latin 'integritas'.", "Mutu, sifat, atau keadaan yang menunjukkan kesatuan yang utuh sehingga memiliki potensi dan kemampuan yang memancarkan kewibawaan; kejujuran.", "Setiap pemimpin harus memiliki integritas yang tinggi.;Integritas bangsa harus tetap terjaga."],
+      ["Resiliensi", "Nomina", "Dari bahasa Inggris 'resilience'.", "Kemampuan untuk beradaptasi dan tetap teguh dalam situasi sulit; daya kenyal; daya lentur.", "Resiliensi masyarakat pesisir diuji saat menghadapi banjir rob.;Pendidikan karakter membangun resiliensi mental."]
     ];
 
     const ws = XLSX.utils.aoa_to_sheet(templateData);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "Template Kamus");
     XLSX.writeFile(wb, "Template_Kamus_Pintar.xlsx");
+  };
+
+  // Excel Export Current Data
+  const downloadCurrentData = async () => {
+    setIsProcessing(true);
+    try {
+      // Fetch all words for export
+      const querySnapshot = await getDocs(collection(db, 'words'));
+      const exportData = [
+        ["Kata", "Kategori", "Etimologi", "Definisi", "Contoh Kalimat"]
+      ];
+
+      querySnapshot.forEach((doc) => {
+        const w = doc.data() as WordEntry;
+        exportData.push([
+          w.word,
+          w.category,
+          w.etymology || '',
+          w.definition,
+          (w.examples || []).join(';')
+        ]);
+      });
+
+      const ws = XLSX.utils.aoa_to_sheet(exportData);
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, "Database Leksikon");
+      XLSX.writeFile(wb, `Database_Leksikon_${new Date().toISOString().split('T')[0]}.xlsx`);
+    } catch (err) {
+      console.error("Export error:", err);
+      alert("Gagal mengekspor data.");
+    } finally {
+      setIsProcessing(false);
+    }
   };
 
   // Excel Import Logic
@@ -241,20 +265,22 @@ export default function App() {
         const data = XLSX.utils.sheet_to_json(ws, { header: 1 }) as any[][];
 
         // Validasi header (baris pertama)
-        // A: Kata, B: Kategori, C: Definisi, D: Contoh Kalimat
-        const validRows = data.slice(1).filter(row => row[0] && row[2]); // Minimal ada kata dan definisi
+        // A: Kata, B: Kategori, C: Etimologi, D: Definisi, E: Contoh Kalimat
+        const validRows = data.slice(1).filter(row => row[0] && row[3]); // Minimal ada kata dan definisi
         
         let successCount = 0;
         for (const row of validRows) {
           const word = String(row[0]).trim();
           const category = String(row[1] || 'Nomina').trim();
-          const definition = String(row[2]).trim();
+          const etymology = String(row[2] || '').trim();
+          const definition = String(row[3]).trim();
           // Contoh kalimat dipisahkan dengan titik koma (;)
-          const examples = row[3] ? String(row[3]).split(';').map(s => s.trim()) : [];
+          const examples = row[4] ? String(row[4]).split(';').map(s => s.trim()) : [];
           
           const wordEntry: WordEntry = {
             word,
             category,
+            etymology,
             definition,
             examples
           };
@@ -266,6 +292,13 @@ export default function App() {
           });
           successCount++;
         }
+
+        const uploadInfo = {
+          timestamp: new Date().toLocaleString('id-ID'),
+          count: successCount
+        };
+        setLastUpload(uploadInfo);
+        localStorage.setItem('leksikon_last_upload', JSON.stringify(uploadInfo));
 
         alert(`Berhasil mengimpor ${successCount} kosakata ke database.`);
         setError(null);
@@ -342,6 +375,7 @@ export default function App() {
     setError(null);
     setIsProcessing(true);
     setSearchQuery(trimmedQuery);
+    setShowSuggestions(false);
 
     try {
       // Direct lookup from Firestore for scalability (up to 5000+ words)
@@ -421,31 +455,44 @@ export default function App() {
       return;
     }
 
-    // Gunakan jeda sedikit agar artikulasi lebih jelas
-    const utterance = new SpeechSynthesisUtterance(`${text}. . . Definisi: ${subText}`);
+    // Matikan suara sebelumnya jika ada yang menggantung
+    window.speechSynthesis.cancel();
+
+    // Buat utterance baru
+    const utterance = new SpeechSynthesisUtterance(`${text}. Definisi: ${subText}`);
     utterance.lang = 'id-ID';
     
-    // Pencarian suara Bahasa Indonesia yang lebih agresif
-    const voices = window.speechSynthesis.getVoices();
-    const idVoice = voices.find(v => v.lang === 'id-ID') || 
-                    voices.find(v => v.lang === 'id_ID') || 
-                    voices.find(v => v.lang.startsWith('id'));
-    
-    if (idVoice) {
-      utterance.voice = idVoice;
-    }
-    
-    utterance.rate = 0.8; // Sedikit lebih lambat agar terdengar seperti kamus profesional
-    utterance.pitch = 1.0;
+    // Pencarian suara Bahasa Indonesia secara asinkron atau langsung
+    const setVoice = () => {
+      const voices = window.speechSynthesis.getVoices();
+      const idVoice = voices.find(v => v.lang === 'id-ID') || 
+                      voices.find(v => v.lang === 'id_ID') || 
+                      voices.find(v => v.lang.startsWith('id')) ||
+                      voices.find(v => v.name.toLowerCase().includes('indonesia'));
+      
+      if (idVoice) {
+        utterance.voice = idVoice;
+      }
+      
+      utterance.rate = 0.85; 
+      utterance.pitch = 1.0;
+      utterance.volume = 1.0;
 
-    utterance.onstart = () => setIsSpeaking(true);
-    utterance.onend = () => setIsSpeaking(false);
-    utterance.onerror = (e) => {
-      console.error("Speech Synthesis Error:", e);
-      setIsSpeaking(false);
+      utterance.onstart = () => setIsSpeaking(true);
+      utterance.onend = () => setIsSpeaking(false);
+      utterance.onerror = (e) => {
+        console.error("Speech Synthesis Error:", e);
+        setIsSpeaking(false);
+      };
+
+      window.speechSynthesis.speak(utterance);
     };
 
-    window.speechSynthesis.speak(utterance);
+    if (window.speechSynthesis.getVoices().length === 0) {
+      window.speechSynthesis.onvoiceschanged = setVoice;
+    } else {
+      setVoice();
+    }
   };
 
   const handleLogin = async (e?: React.FormEvent) => {
@@ -508,16 +555,14 @@ export default function App() {
           </div>
         </div>
         <div className="flex flex-wrap gap-2 md:gap-4 text-[10px] font-sans font-bold uppercase tracking-widest mt-6 md:mt-0 items-center justify-center md:justify-end">
-            {(locationInfo || isLoadingLocation) && (
+            {isOffline && (
               <motion.div 
-                initial={{ opacity: 0, y: -10 }}
-                animate={{ opacity: 1, y: 0 }}
-                className="flex items-center gap-2 px-3 py-1.5 border border-gray-100 bg-[#f9f8f4] text-gray-400 rounded-sm"
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                className="flex items-center gap-2 px-3 py-1.5 border border-red-100 bg-red-50 text-red-600 rounded-sm"
               >
-                <MapPin size={12} className={isLoadingLocation ? "animate-bounce" : "text-amber-600"} />
-                <span className="text-[9px] font-sans font-medium tracking-wider max-w-[120px] truncate">
-                  {isLoadingLocation ? 'Mendeteksi Lokasi...' : locationInfo}
-                </span>
+                <div className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse"></div>
+                <span className="text-[9px]">Offline</span>
               </motion.div>
             )}
             <button 
@@ -579,31 +624,94 @@ export default function App() {
                 type="text"
                 placeholder="Ketuk untuk mencari..."
                 value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
+                onBlur={() => setTimeout(() => setShowSuggestions(false), 200)}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  setSearchQuery(val);
+                  if (val.trim().length > 0) {
+                    const filtered = words.filter(w => 
+                      w.word.toLowerCase().startsWith(val.toLowerCase())
+                    ).slice(0, 5);
+                    setSuggestions(filtered);
+                    setShowSuggestions(true);
+                  } else {
+                    setShowSuggestions(false);
+                  }
+                }}
                 onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
                 className="bg-transparent text-2xl focus:outline-none w-full italic font-light placeholder:text-gray-300"
               />
             </div>
+            
+            {/* Autocomplete Suggestions */}
+            <AnimatePresence>
+              {showSuggestions && suggestions.length > 0 && (
+                <motion.div 
+                  initial={{ opacity: 0, y: -10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -10 }}
+                  className="absolute z-40 left-0 right-0 top-full mt-2 bg-white border border-gray-200 shadow-xl rounded-sm overflow-hidden"
+                >
+                  {suggestions.map((s, idx) => (
+                    <button
+                      key={idx}
+                      onClick={() => handleSearch(s.word)}
+                      className="w-full text-left px-4 py-3 hover:bg-[#fdfbf7] flex items-center justify-between group transition-colors"
+                    >
+                      <span className="font-serif italic text-lg capitalize">{s.word}</span>
+                      <ArrowRight size={14} className="opacity-0 group-hover:opacity-30 transform -translate-x-2 group-hover:translate-x-0 transition-all" />
+                    </button>
+                  ))}
+                </motion.div>
+              )}
+            </AnimatePresence>
           </div>
 
           {isAdmin && (
             <div className="space-y-4">
               <button 
                 onClick={() => {
-                  setEditForm({ word: '', category: 'Nomina', definition: '', examples: ['', ''] });
+                  setEditForm({ word: '', category: 'Nomina', etymology: '', definition: '', examples: ['', ''] });
                   setIsEditing(true);
                 }}
                 className="w-full py-4 border-2 border-dashed border-gray-200 rounded-sm text-gray-400 hover:border-[#1a1a1a] hover:text-[#1a1a1a] transition-all flex items-center justify-center gap-2 font-sans font-bold uppercase tracking-widest text-xs"
               >
                 <Plus size={16} /> Tambah Kosakata Baru
               </button>
+
+              <div className="p-4 bg-white border border-gray-200 rounded-sm space-y-3">
+                <div className="flex items-center justify-between">
+                  <h4 className="text-[9px] font-sans font-bold uppercase tracking-[0.2em] opacity-40">Statistik Data</h4>
+                  <div className="flex items-center gap-1.5">
+                    <div className="w-1.5 h-1.5 rounded-full bg-green-500"></div>
+                    <span className="text-[9px] font-sans font-bold text-green-600 uppercase">Live</span>
+                  </div>
+                </div>
+                <div className="flex justify-between items-baseline">
+                  <span className="text-xs opacity-60">Total Kata:</span>
+                  <span className="text-xl font-bold font-sans tracking-tight">{words.length}+</span>
+                </div>
+                {lastUpload && (
+                  <div className="space-y-2 pt-2 border-t border-gray-50">
+                    <div className="flex justify-between text-[9px] font-sans uppercase tracking-widest opacity-50">
+                      <span>Upload Terakhir:</span>
+                      <span>{lastUpload.timestamp}</span>
+                    </div>
+                    <div className="flex justify-between text-[9px] font-sans uppercase tracking-widest opacity-50">
+                      <span>Jumlah Baris:</span>
+                      <span>{lastUpload.count} Kata</span>
+                    </div>
+                  </div>
+                )}
+              </div>
               
               <div className="grid grid-cols-1 gap-2">
                 <button 
-                  onClick={downloadTemplate}
-                  className="w-full py-3 border border-gray-200 rounded-sm text-[10px] font-sans font-bold uppercase tracking-widest flex items-center justify-center gap-2 hover:bg-white hover:border-[#1a1a1a] transition-all"
+                  onClick={downloadCurrentData}
+                  disabled={isProcessing}
+                  className="w-full py-3 border border-gray-200 rounded-sm text-[10px] font-sans font-bold uppercase tracking-widest flex items-center justify-center gap-2 hover:bg-white hover:border-[#1a1a1a] transition-all disabled:opacity-50"
                 >
-                  <Download size={14} /> Unduh Template Excel
+                  <Download size={14} /> Unduh Data Terbaru (Excel)
                 </button>
                 
                 <label className="w-full py-3 bg-[#f3f4f6] text-[#1a1a1a] border border-gray-200 rounded-sm text-[10px] font-sans font-bold uppercase tracking-widest flex items-center justify-center gap-2 hover:bg-gray-200 cursor-pointer transition-all">
@@ -764,6 +872,16 @@ export default function App() {
                   </div>
 
                   <div>
+                    <label className="block text-[10px] font-sans font-bold uppercase tracking-widest mb-2 opacity-50">Asal Usul (Etimologi)</label>
+                    <textarea 
+                      value={editForm.etymology}
+                      onChange={(e) => setEditForm(prev => ({ ...prev, etymology: e.target.value }))}
+                      className="w-full text-lg font-serif italic border border-gray-200 p-4 focus:border-[#1a1a1a] focus:outline-none min-h-[80px] bg-transparent"
+                      placeholder="Contoh: Dari bahasa Sanskerta '...' atau bahasa Arab '...'"
+                    />
+                  </div>
+
+                  <div>
                     <label className="block text-[10px] font-sans font-bold uppercase tracking-widest mb-2 opacity-50">Definisi</label>
                     <textarea 
                       value={editForm.definition}
@@ -806,7 +924,7 @@ export default function App() {
                   {isAdmin && (
                     <button 
                       onClick={() => {
-                        setEditForm({ word: searchQuery, category: 'Nomina', definition: '', examples: ['', ''] });
+                        setEditForm({ word: searchQuery, category: 'Nomina', etymology: '', definition: '', examples: ['', ''] });
                         setIsEditing(true);
                         setError(null);
                       }}
@@ -867,6 +985,13 @@ export default function App() {
                 </div>
 
                 <div className="flex-grow space-y-8 md:space-y-12">
+                  <section>
+                    <h4 className="text-[10px] md:text-[11px] font-sans font-bold uppercase tracking-widest border-b border-gray-100 pb-3 mb-4 md:mb-6">Asal Usul Kata</h4>
+                    <p className="text-xl md:text-2xl italic font-serif text-gray-600">
+                      {result.etymology || 'Informasi etimologi belum tersedia.'}
+                    </p>
+                  </section>
+
                   <section>
                     <h4 className="text-[10px] md:text-[11px] font-sans font-bold uppercase tracking-widest border-b border-gray-100 pb-3 mb-4 md:mb-6">Definisi</h4>
                     <p className="text-2xl md:text-3xl leading-snug font-serif text-gray-900">
