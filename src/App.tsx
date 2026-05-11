@@ -9,7 +9,7 @@
  */
 
 import React, { useState, useEffect, useRef } from 'react';
-import { Search, History, BookOpen, Trash2, ArrowRight, Info, Plus, Edit2, X, Save, Settings, LogIn, LogOut, Upload, Download, FileSpreadsheet, Loader2, Bell, BellOff } from 'lucide-react';
+import { Search, History, BookOpen, Trash2, ArrowRight, Info, Plus, Edit2, X, Save, Settings, LogIn, LogOut, Upload, Download, FileSpreadsheet, Loader2, Bell, BellOff, MapPin, Volume2, VolumeX } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import * as XLSX from 'xlsx';
 import { initialWords, type WordEntry } from './data/initialWords.ts';
@@ -34,6 +34,9 @@ export default function App() {
   const [loginCreds, setLoginCreds] = useState({ email: '', password: '' });
   const [loginError, setLoginError] = useState<string | null>(null);
   const [notificationsEnabled, setNotificationsEnabled] = useState(false);
+  const [locationInfo, setLocationInfo] = useState<string | null>(null);
+  const [isLoadingLocation, setIsLoadingLocation] = useState(false);
+  const [isSpeaking, setIsSpeaking] = useState(false);
   
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -66,6 +69,35 @@ export default function App() {
     const notifPref = localStorage.getItem('leksikon_notifications');
     if (notifPref === 'enabled') {
       setNotificationsEnabled(true);
+    }
+
+    // Geolocation detection
+    if ("geolocation" in navigator) {
+      setIsLoadingLocation(true);
+      navigator.geolocation.getCurrentPosition(
+        async (position) => {
+          const { latitude, longitude } = position.coords;
+          try {
+            // Using OSM Nominatim (Free) - User agent header is good practice but fetch in browser doesn't allow setting it easily
+            // We'll just use a simple fetch
+            const response = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${latitude}&lon=${longitude}&zoom=10`);
+            const data = await response.json();
+            const city = data.address.city || data.address.town || data.address.village || data.address.city_district || data.address.state || "Lokasi Anda";
+            setLocationInfo(city);
+          } catch (err) {
+            console.error("Geocoding error:", err);
+            // Fallback to coordinates
+            setLocationInfo(`${latitude.toFixed(2)}°, ${longitude.toFixed(2)}°`);
+          } finally {
+            setIsLoadingLocation(false);
+          }
+        },
+        (error) => {
+          console.error("Geolocation access error:", error);
+          setIsLoadingLocation(false);
+        },
+        { enableHighAccuracy: false, timeout: 10000, maximumAge: 3600000 }
+      );
     }
   }, []);
 
@@ -106,17 +138,30 @@ export default function App() {
         const index = Math.floor(Math.random() * words.length);
         const randomWord = words[index];
         
-        new Notification('Kata Hari Ini: ' + randomWord.word, {
-          body: randomWord.definition,
-          icon: '/android-chrome-192x192.png'
+        const notification = new Notification('📖 Leksikon: Kata Hari Ini', {
+          body: `${randomWord.word.toUpperCase()}: ${randomWord.definition}`,
+          icon: '/logo.png',
+          badge: '/logo.png',
+          tag: 'daily-word'
         });
+
+        notification.onclick = () => {
+          window.focus();
+          setResult(randomWord);
+          addToHistory(randomWord.word.toLowerCase());
+          setSearchQuery(randomWord.word.toLowerCase());
+        };
+
         localStorage.setItem('last_notif_sent', today);
       }
     };
 
     const interval = setInterval(checkDailyNotif, 1000 * 60); // Check every minute
     checkDailyNotif(); // Run once on load
-    return () => clearInterval(interval);
+    return () => {
+      clearInterval(interval);
+      window.speechSynthesis.cancel();
+    };
   }, [notificationsEnabled, words]);
 
   // Listen for Firestore updates - Limited to prevent over-fetching thousands of words
@@ -353,6 +398,34 @@ export default function App() {
     }
   };
 
+  const handleSpeak = (text: string, subText: string) => {
+    if (isSpeaking) {
+      window.speechSynthesis.cancel();
+      setIsSpeaking(false);
+      return;
+    }
+
+    const utterance = new SpeechSynthesisUtterance(`${text}. Definisi: ${subText}`);
+    
+    // Find Indonesian voice
+    const voices = window.speechSynthesis.getVoices();
+    const idVoice = voices.find(v => v.lang.includes('id-ID')) || voices.find(v => v.lang.includes('id'));
+    
+    if (idVoice) {
+      utterance.voice = idVoice;
+    }
+    
+    utterance.lang = 'id-ID';
+    utterance.rate = 0.9; // Slightly slower for clarity
+    utterance.pitch = 1.0;
+
+    utterance.onstart = () => setIsSpeaking(true);
+    utterance.onend = () => setIsSpeaking(false);
+    utterance.onerror = () => setIsSpeaking(false);
+
+    window.speechSynthesis.speak(utterance);
+  };
+
   const handleLogin = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     
@@ -413,6 +486,18 @@ export default function App() {
           </div>
         </div>
         <div className="flex flex-wrap gap-2 md:gap-4 text-[10px] font-sans font-bold uppercase tracking-widest mt-6 md:mt-0 items-center justify-center md:justify-end">
+            {(locationInfo || isLoadingLocation) && (
+              <motion.div 
+                initial={{ opacity: 0, y: -10 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="flex items-center gap-2 px-3 py-1.5 border border-gray-100 bg-[#f9f8f4] text-gray-400 rounded-sm"
+              >
+                <MapPin size={12} className={isLoadingLocation ? "animate-bounce" : "text-amber-600"} />
+                <span className="text-[9px] font-sans font-medium tracking-wider max-w-[120px] truncate">
+                  {isLoadingLocation ? 'Mendeteksi Lokasi...' : locationInfo}
+                </span>
+              </motion.div>
+            )}
             <button 
               onClick={toggleNotifications}
               className={`flex items-center gap-2 px-3 py-1.5 border rounded-sm transition-all ${notificationsEnabled ? 'bg-amber-50 border-amber-200 text-amber-700' : 'border-gray-200 text-gray-400 hover:border-[#1a1a1a] hover:text-[#1a1a1a]'}`}
@@ -538,17 +623,25 @@ export default function App() {
 
                 {/* Notification Preview for Admin */}
                 <div className="p-6 bg-[#1a1a1a] text-white rounded-sm space-y-4 shadow-xl mt-6">
-                  <div className="flex items-center gap-2 border-b border-white/10 pb-3">
-                    <Bell size={14} className="text-amber-400" />
-                    <h3 className="text-[10px] font-sans font-bold uppercase tracking-widest text-amber-400">Pratinjau Notifikasi Harian (08:00 WIB)</h3>
+                  <div className="flex items-center justify-between border-b border-white/10 pb-3">
+                    <div className="flex items-center gap-2">
+                      <Bell size={14} className="text-amber-400" />
+                      <h3 className="text-[10px] font-sans font-bold uppercase tracking-widest text-amber-400">Pratinjau Notifikasi (08:00 WIB)</h3>
+                    </div>
+                    <span className="text-[8px] bg-white/10 px-2 py-0.5 rounded-full text-white/50 tracking-widest uppercase">Real-time</span>
                   </div>
                   
                   <div className="space-y-4">
-                    <div className="bg-white/5 p-4 rounded-sm border border-white/5">
-                      <p className="text-[10px] font-sans uppercase tracking-[0.2em] opacity-40 mb-2">Simulasi Pengunjung</p>
-                      <h4 className="text-lg font-bold font-sans tracking-tight mb-1">Kata Hari Ini: Berdikari</h4>
-                      <p className="text-xs text-gray-400 line-clamp-2 italic font-serif">
-                        Berdiri di atas kaki sendiri; tidak bergantung pada bantuan orang lain.
+                    <div className="bg-white/5 p-4 rounded-sm border border-white/5 hover:bg-white/10 transition-colors group">
+                      <div className="flex justify-between items-center mb-2">
+                        <p className="text-[10px] font-sans uppercase tracking-[0.2em] opacity-40">📱 Notifikasi Ponsel</p>
+                        <span className="text-[8px] opacity-20">Baru Saja</span>
+                      </div>
+                      <h4 className="text-lg font-bold font-sans tracking-tight mb-1 text-white border-l-2 border-amber-400 pl-3">
+                        📖 Leksikon: {words.length > 0 ? words[Math.floor(Date.now()/1000/60/60/24) % words.length]?.word.toUpperCase() : 'BERDIKARI'}
+                      </h4>
+                      <p className="text-xs text-gray-400 line-clamp-2 italic font-serif pl-3 mt-2">
+                        {words.length > 0 ? words[Math.floor(Date.now()/1000/60/60/24) % words.length]?.definition : 'Berdiri di atas kaki sendiri; tidak bergantung pada bantuan.'}
                       </p>
                     </div>
                     
@@ -713,6 +806,13 @@ export default function App() {
                   <div>
                     <div className="flex items-baseline gap-4 md:gap-6 mb-4 flex-wrap">
                       <h2 className="text-5xl md:text-7xl font-light italic tracking-tight capitalize">{result.word}</h2>
+                      <button 
+                        onClick={() => handleSpeak(result.word, result.definition)}
+                        className={`p-3 rounded-full border transition-all ${isSpeaking ? 'bg-[#1a1a1a] text-white border-[#1a1a1a] animate-pulse' : 'bg-white text-[#1a1a1a] border-gray-100 hover:border-[#1a1a1a]'}`}
+                        title="Dengarkan Pengucapan"
+                      >
+                        {isSpeaking ? <VolumeX size={24} /> : <Volume2 size={24} />}
+                      </button>
                       <span className="text-lg md:text-xl font-serif italic opacity-40">/{result.word.toLowerCase().split('').join('·')}/</span>
                     </div>
                     <div className="flex gap-2">

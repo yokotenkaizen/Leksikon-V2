@@ -1,6 +1,6 @@
 {
-  "name": "Kamus Pintar",
-  "description": "Kamus Bahasa Indonesia digital dengan basis data yang dapat dikelola secara mandiri, menyediakan definisi gaya KBBI dan contoh penggunaan kalimat.",
-  "requestFramePermissions": [],
+  "name": "Leksikon",
+  "description": "Kamus Besar Bahasa Indonesia Digital Modern dengan fitur notifikasi harian, manajemen kata, dan pencarian liris.",
+  "requestFramePermissions": ["geolocation"],
   "majorCapabilities": []
 }
