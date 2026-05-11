@@ -101,6 +101,22 @@ export default function App() {
     }
   }, []);
 
+  // Speech Voices Pre-loading & Synthesis Cleanup
+  useEffect(() => {
+    const loadVoices = () => {
+      window.speechSynthesis.getVoices();
+    };
+    
+    loadVoices();
+    if (window.speechSynthesis.onvoiceschanged !== undefined) {
+      window.speechSynthesis.onvoiceschanged = loadVoices;
+    }
+
+    return () => {
+      window.speechSynthesis.cancel();
+    };
+  }, []);
+
   const toggleNotifications = async () => {
     if (notificationsEnabled) {
       setNotificationsEnabled(false);
@@ -405,23 +421,29 @@ export default function App() {
       return;
     }
 
-    const utterance = new SpeechSynthesisUtterance(`${text}. Definisi: ${subText}`);
+    // Gunakan jeda sedikit agar artikulasi lebih jelas
+    const utterance = new SpeechSynthesisUtterance(`${text}. . . Definisi: ${subText}`);
+    utterance.lang = 'id-ID';
     
-    // Find Indonesian voice
+    // Pencarian suara Bahasa Indonesia yang lebih agresif
     const voices = window.speechSynthesis.getVoices();
-    const idVoice = voices.find(v => v.lang.includes('id-ID')) || voices.find(v => v.lang.includes('id'));
+    const idVoice = voices.find(v => v.lang === 'id-ID') || 
+                    voices.find(v => v.lang === 'id_ID') || 
+                    voices.find(v => v.lang.startsWith('id'));
     
     if (idVoice) {
       utterance.voice = idVoice;
     }
     
-    utterance.lang = 'id-ID';
-    utterance.rate = 0.9; // Slightly slower for clarity
+    utterance.rate = 0.8; // Sedikit lebih lambat agar terdengar seperti kamus profesional
     utterance.pitch = 1.0;
 
     utterance.onstart = () => setIsSpeaking(true);
     utterance.onend = () => setIsSpeaking(false);
-    utterance.onerror = () => setIsSpeaking(false);
+    utterance.onerror = (e) => {
+      console.error("Speech Synthesis Error:", e);
+      setIsSpeaking(false);
+    };
 
     window.speechSynthesis.speak(utterance);
   };
