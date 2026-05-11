@@ -402,12 +402,17 @@ export default function App() {
   return (
     <div className="min-h-screen bg-[#fdfbf7] text-[#1a1a1a] font-serif selection:bg-gray-200 pb-20">
       {/* Header */}
-      <header className="max-w-6xl mx-auto px-6 py-8 md:py-12 flex flex-col md:flex-row md:items-end justify-between border-b border-[#1a1a1a]/10 mb-8 md:mb-12">
-        <div className="cursor-pointer group" onClick={() => { setResult(null); setSearchQuery(''); }}>
-          <h1 className="text-4xl md:text-5xl font-black tracking-tighter uppercase font-sans group-hover:text-gray-700 transition-colors">Leksikon</h1>
-          <p className="text-[9px] md:text-[10px] font-sans uppercase tracking-[0.2em] opacity-50 mt-1">Kamus Besar Bahasa Indonesia Digital</p>
+      <header className="max-w-6xl mx-auto px-6 py-6 md:py-8 flex flex-col md:flex-row md:items-center justify-between border-b border-[#1a1a1a]/10 mb-8 md:mb-12">
+        <div className="cursor-pointer group flex items-center gap-4" onClick={() => { setResult(null); setSearchQuery(''); }}>
+          <div className="w-12 h-12 md:w-16 md:h-16 bg-gradient-to-br from-[#1a1a1a] to-gray-700 rounded-xl flex items-center justify-center shadow-lg transform group-hover:scale-105 transition-all">
+            <span className="text-white text-2xl md:text-3xl font-black font-sans">L</span>
+          </div>
+          <div>
+            <h1 className="text-3xl md:text-4xl font-black tracking-tighter uppercase font-sans group-hover:text-gray-700 transition-colors leading-none">Leksikon</h1>
+            <p className="text-[8px] md:text-[9px] font-sans uppercase tracking-[0.2em] opacity-50 mt-1">Kamus Besar Bahasa Indonesia Digital</p>
+          </div>
         </div>
-          <div className="flex flex-wrap gap-3 md:gap-4 text-[11px] font-sans font-bold uppercase tracking-widest mt-8 md:mt-0 items-center">
+        <div className="flex flex-wrap gap-2 md:gap-4 text-[10px] font-sans font-bold uppercase tracking-widest mt-6 md:mt-0 items-center justify-center md:justify-end">
             <button 
               onClick={toggleNotifications}
               className={`flex items-center gap-2 px-3 py-1.5 border rounded-sm transition-all ${notificationsEnabled ? 'bg-amber-50 border-amber-200 text-amber-700' : 'border-gray-200 text-gray-400 hover:border-[#1a1a1a] hover:text-[#1a1a1a]'}`}
