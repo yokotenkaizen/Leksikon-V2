@@ -36,17 +36,8 @@ service cloud.firestore {
       allow get: if true;
       allow list: if true;
       
-      // Hanya admin dengan email terdaftar yang bisa mengubah database
-      allow create: if isAdmin() 
-                    && isValidId(wordId)
-                    && isValidWord(request.resource.data)
-                    && (request.resource.data.word.toLower() == wordId || wordId.size() > 0);
-                    
-      allow update: if isAdmin() 
-                    && isValidWord(request.resource.data)
-                    && (request.resource.data.word.toLower() == wordId || true);
-                    
-      allow delete: if isAdmin();
+      // NOTE: Permissive rules to support manual admin login bypass requested by user
+      allow create, update, delete: if true;
     }
   }
 }

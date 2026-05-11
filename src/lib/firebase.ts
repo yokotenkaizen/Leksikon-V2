@@ -1,6 +1,6 @@
 import { initializeApp } from 'firebase/app';
-import { getAuth, GoogleAuthProvider, signInWithPopup, signOut } from 'firebase/auth';
-import { getFirestore, collection, doc, setDoc, getDoc, getDocs, updateDoc, deleteDoc, query, where, onSnapshot } from 'firebase/firestore';
+import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, signInWithEmailAndPassword, createUserWithEmailAndPassword } from 'firebase/auth';
+import { getFirestore, collection, doc, setDoc, getDoc, getDocs, updateDoc, deleteDoc, query, where, limit, onSnapshot, getDocFromServer } from 'firebase/firestore';
 import rawConfig from '../../firebase-applet-config.json';
 
 const firebaseConfig = (function() {
@@ -32,8 +32,8 @@ export { db, auth };
 export const googleProvider = new GoogleAuthProvider();
 
 export { 
-  collection, doc, setDoc, getDoc, getDocs, updateDoc, deleteDoc, query, where, onSnapshot,
-  signInWithPopup, signOut
+  collection, doc, setDoc, getDoc, getDocs, updateDoc, deleteDoc, query, where, limit, onSnapshot, getDocFromServer,
+  signInWithPopup, signOut, signInWithEmailAndPassword, createUserWithEmailAndPassword
 };
 
 // Error handler for Firestore
