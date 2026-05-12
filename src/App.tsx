@@ -14,7 +14,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import * as XLSX from 'xlsx';
 import { initialWords, type WordEntry } from './data/initialWords.ts';
 import { 
-  db, collection, doc, setDoc, getDoc, getDocs, updateDoc, deleteDoc, query, where, limit, onSnapshot, getDocFromServer,
+  db, collection, doc, setDoc, getDoc, getDocs, updateDoc, deleteDoc, query, where, limit, onSnapshot, getDocFromServer, increment,
   OperationType, handleFirestoreError 
 } from './lib/firebase.ts';
 
@@ -37,6 +37,7 @@ export default function App() {
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [isOffline, setIsOffline] = useState(!navigator.onLine);
   const [lastUpload, setLastUpload] = useState<{timestamp: string, count: number} | null>(null);
+  const [stats, setStats] = useState({ totalSearches: 0, totalInstalls: 0 });
   
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -174,24 +175,33 @@ export default function App() {
   // Listen for Firestore updates - Limited to prevent over-fetching thousands of words
   useEffect(() => {
     // Only fetch limited number of words for initial display/metadata
-    const q = query(collection(db, 'words'), limit(100));
+    // Using a larger limit for better offline search coverage
+    const q = query(collection(db, 'words'), limit(5000));
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const wordsData: WordEntry[] = [];
       snapshot.forEach((doc) => {
         wordsData.push(doc.data() as WordEntry);
       });
-      console.log(`Loaded ${wordsData.length} words from Firestore (preview)`);
+      console.log(`Loaded ${wordsData.length} words from Firestore (cache/online)`);
       setWords(wordsData);
     }, (err) => {
-      // Jika error karena permission, mungkin user belum login
       console.warn("Firestore listener error:", err.message);
-      if (err.message.includes("permissions")) {
-        // Jangan throw error keras ke UI, cukup log
-      } else {
-        handleFirestoreError(err, OperationType.LIST, 'words');
-      }
+      // In offline mode, Firestore will still emit snapshot from cache if available
     });
 
+    return () => unsubscribe();
+  }, []);
+
+  // Listen for global stats
+  useEffect(() => {
+    const docRef = doc(db, 'stats', 'global');
+    const unsubscribe = onSnapshot(docRef, (snapshot) => {
+      if (snapshot.exists()) {
+        setStats(snapshot.data() as any);
+      }
+    }, (err) => {
+      console.warn("Stats listener error:", err);
+    });
     return () => unsubscribe();
   }, []);
 
@@ -345,10 +355,22 @@ export default function App() {
     
     window.addEventListener('beforeinstallprompt', handler);
     
+    // Increment global install count
+    const incrementInstall = async () => {
+      try {
+        await setDoc(doc(db, 'stats', 'global'), {
+          totalInstalls: increment(1)
+        }, { merge: true });
+      } catch (e) {
+        console.warn("Failed to increment install count:", e);
+      }
+    };
+
     // Jika PWA sudah terinstal
     window.addEventListener('appinstalled', () => {
       setShowInstallBtn(false);
       setDeferredPrompt(null);
+      incrementInstall();
     });
 
     return () => window.removeEventListener('beforeinstallprompt', handler);
@@ -362,6 +384,7 @@ export default function App() {
     }
     deferredPrompt.prompt();
     const { outcome } = await deferredPrompt.userChoice;
+    
     if (outcome === 'accepted') {
       setShowInstallBtn(false);
     }
@@ -378,24 +401,39 @@ export default function App() {
     setShowSuggestions(false);
 
     try {
-      // Direct lookup from Firestore for scalability (up to 5000+ words)
-      const cached = words.find(w => w.word.toLowerCase() === trimmedQuery);
-      if (cached) {
-        setResult(cached);
-        addToHistory(trimmedQuery);
-        setIsProcessing(false);
-        return;
+      // 1. Check local state 'words' (already contains some cached/synced words)
+      let found = words.find(w => w.word.toLowerCase() === trimmedQuery);
+      
+      // 2. Fetch from Firestore (will use local cache if offline)
+      if (!found) {
+        const docRef = doc(db, 'words', trimmedQuery);
+        try {
+          const docSnap = await getDoc(docRef);
+          if (docSnap.exists()) {
+            found = docSnap.data() as WordEntry;
+          }
+        } catch (getErr: any) {
+          console.warn("Failed to fetch from Firestore:", getErr.message);
+          // If completely offline and not in cache, 'getDoc' might throw 
+        }
       }
 
-      const docRef = doc(db, 'words', trimmedQuery);
-      const docSnap = await getDoc(docRef);
-
-      if (docSnap.exists()) {
-        const found = docSnap.data() as WordEntry;
+      if (found) {
         setResult(found);
         addToHistory(trimmedQuery);
+        
+        // 3. Increment global search count (Backgrounded, Firestore handles offline queueing)
+        setDoc(doc(db, 'stats', 'global'), {
+          totalSearches: increment(1)
+        }, { merge: true }).catch(e => {
+          console.warn("Search count increment queued or failed:", e.message);
+        });
       } else {
-        setError('Maaf, kata tersebut tidak ditemukan dalam basis data.');
+        if (isOffline) {
+          setError('Maaf, kata ini belum ada di memori offline. Hubungkan ke internet untuk mencarinya.');
+        } else {
+          setError('Maaf, kata tersebut tidak ditemukan dalam basis data.');
+        }
         setResult(null);
       }
     } catch (err) {
@@ -422,6 +460,10 @@ export default function App() {
     
     const wordId = editForm.word.toLowerCase();
     try {
+      if (isOffline) {
+        alert("Anda sedang offline. Perubahan telah disimpan secara lokal dan akan disinkronkan saat internet kembali.");
+      }
+      
       await setDoc(doc(db, 'words', wordId), {
         ...editForm,
         updatedAt: new Date().toISOString()
@@ -439,6 +481,9 @@ export default function App() {
     if (window.confirm(`Hapus kata "${word}" dari database?`)) {
       const wordId = word.toLowerCase();
       try {
+        if (isOffline) {
+          alert("Anda sedang offline. Penghapusan telah dijadwalkan dan akan disinkronkan saat internet kembali.");
+        }
         await deleteDoc(doc(db, 'words', wordId));
         setResult(null);
         setHistory(prev => prev.filter(w => w.toLowerCase() !== word.toLowerCase()));
@@ -687,9 +732,21 @@ export default function App() {
                     <span className="text-[9px] font-sans font-bold text-green-600 uppercase">Live</span>
                   </div>
                 </div>
-                <div className="flex justify-between items-baseline">
-                  <span className="text-xs opacity-60">Total Kata:</span>
-                  <span className="text-xl font-bold font-sans tracking-tight">{words.length}+</span>
+                <div className="space-y-4">
+                  <div className="flex justify-between items-baseline">
+                    <span className="text-xs opacity-60">Total Kata:</span>
+                    <span className="text-xl font-bold font-sans tracking-tight">{words.length}+</span>
+                  </div>
+                  <div className="grid grid-cols-2 gap-4 border-t border-gray-50 pt-3">
+                    <div>
+                      <p className="text-[8px] font-sans font-bold uppercase tracking-[0.2em] opacity-40 mb-1">Total Pencarian</p>
+                      <p className="text-lg font-bold font-sans">{stats.totalSearches.toLocaleString('id-ID')}</p>
+                    </div>
+                    <div>
+                      <p className="text-[8px] font-sans font-bold uppercase tracking-[0.2em] opacity-40 mb-1">Total Instalasi</p>
+                      <p className="text-lg font-bold font-sans">{stats.totalInstalls.toLocaleString('id-ID')}</p>
+                    </div>
+                  </div>
                 </div>
                 {lastUpload && (
                   <div className="space-y-2 pt-2 border-t border-gray-50">
@@ -811,14 +868,11 @@ export default function App() {
               </div>
             ) : (
               <div className="p-8 border border-[#1a1a1a] rounded-sm relative overflow-hidden bg-white shadow-[10px_10px_0px_#e5e2da]">
-                <span className="inline-block px-2 py-1 bg-[#1a1a1a] text-[#fdfbf7] text-[9px] uppercase tracking-widest mb-6">Informasi</span>
+                <span className="inline-block px-2 py-1 bg-[#1a1a1a] text-[#fdfbf7] text-[9px] uppercase tracking-widest mb-6 font-sans font-bold">Informasi</span>
                 <h3 className="text-4xl mb-4 leading-none italic">Kamus Pintar</h3>
                 <p className="text-sm leading-relaxed opacity-80 font-serif">
-                  Jelajahi kekayaan kosakata Indonesia dengan definisi akurat dan contoh penggunaan yang tepat.
+                  Jelajahi kekayaan kosakata Indonesia dengan definisi akurat dan contoh penggunaan yang tepat. Basis data ini diperbarui secara berkala oleh tim administrator.
                 </p>
-                <div className="mt-8 text-[9px] font-sans font-bold uppercase tracking-widest opacity-30">
-                  Sistem Basis Data Leksikon
-                </div>
               </div>
             )}
           </div>

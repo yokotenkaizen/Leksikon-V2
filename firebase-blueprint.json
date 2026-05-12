@@ -7,6 +7,7 @@
       "properties": {
         "word": { "type": "string", "description": "The word itself" },
         "category": { "type": "string", "description": "Part of speech (e.g., Nomina, Verba)" },
+        "etymology": { "type": "string", "description": "Origin of the word" },
         "definition": { "type": "string", "description": "The lexical definition" },
         "examples": { 
           "type": "array", 
@@ -16,12 +17,25 @@
         "updatedAt": { "type": "string", "format": "date-time", "description": "Last modified timestamp" }
       },
       "required": ["word", "category", "definition", "examples"]
+    },
+    "AppStats": {
+      "title": "Application Statistics",
+      "description": "Global counters for searches and installations.",
+      "type": "object",
+      "properties": {
+        "totalSearches": { "type": "integer", "description": "Accumulated search count" },
+        "totalInstalls": { "type": "integer", "description": "Accumulated installation count" }
+      }
     }
   },
   "firestore": {
     "/words/{wordId}": {
       "schema": "Word",
       "description": "Collection of dictionary words."
+    },
+    "/stats/{statId}": {
+      "schema": "AppStats",
+      "description": "Global app statistics."
     }
   }
 }

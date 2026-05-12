@@ -39,5 +39,14 @@ service cloud.firestore {
       // NOTE: Permissive rules to support manual admin login bypass requested by user
       allow create, update, delete: if true;
     }
+
+    // Stats collection
+    match /stats/{statId} {
+      allow get: if true;
+      // Memungkinkan update field totalSearches dan totalInstalls oleh siapa pun
+      allow update: if request.resource.data.diff(resource.data).affectedKeys().hasAny(['totalSearches', 'totalInstalls']);
+      // Allow create if it doesn't exist
+      allow create: if true;
+    }
   }
 }

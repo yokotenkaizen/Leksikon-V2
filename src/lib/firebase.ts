@@ -1,6 +1,9 @@
 import { initializeApp } from 'firebase/app';
 import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, signInWithEmailAndPassword, createUserWithEmailAndPassword } from 'firebase/auth';
-import { getFirestore, collection, doc, setDoc, getDoc, getDocs, updateDoc, deleteDoc, query, where, limit, onSnapshot, getDocFromServer } from 'firebase/firestore';
+import { 
+  getFirestore, collection, doc, setDoc, getDoc, getDocs, updateDoc, deleteDoc, query, where, limit, onSnapshot, getDocFromServer, increment,
+  enableIndexedDbPersistence
+} from 'firebase/firestore';
 import rawConfig from '../../firebase-applet-config.json';
 
 const firebaseConfig = (function() {
@@ -21,6 +24,19 @@ try {
     app = initializeApp(firebaseConfig);
     db = getFirestore(app, (firebaseConfig as any).firestoreDatabaseId);
     auth = getAuth(app);
+
+    // Enable persistence for offline mode
+    if (typeof window !== 'undefined') {
+      enableIndexedDbPersistence(db).catch((err) => {
+        if (err.code === 'failed-precondition') {
+          // Multiple tabs open, persistence can only be enabled in one tab at a time.
+          console.warn('Persistence failed-precondition');
+        } else if (err.code === 'unimplemented') {
+          // The current browser does not support all of the features needed to enable persistence
+          console.warn('Persistence unimplemented');
+        }
+      });
+    }
   } else {
     console.warn("Firebase configuration is incomplete. Database features will not work.");
   }
@@ -32,7 +48,7 @@ export { db, auth };
 export const googleProvider = new GoogleAuthProvider();
 
 export { 
-  collection, doc, setDoc, getDoc, getDocs, updateDoc, deleteDoc, query, where, limit, onSnapshot, getDocFromServer,
+  collection, doc, setDoc, getDoc, getDocs, updateDoc, deleteDoc, query, where, limit, onSnapshot, getDocFromServer, increment,
   signInWithPopup, signOut, signInWithEmailAndPassword, createUserWithEmailAndPassword
 };
 
