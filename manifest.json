@@ -8,7 +8,7 @@
   "theme_color": "#1a1a1a",
   "icons": [
     {
-      "src": "leksikon_icon.png",
+      "src": "logo.png",
       "sizes": "512x512",
       "type": "image/png",
       "purpose": "any maskable"
