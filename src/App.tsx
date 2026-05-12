@@ -9,7 +9,7 @@
  */
 
 import React, { useState, useEffect, useRef } from 'react';
-import { Search, History, BookOpen, Trash2, ArrowRight, Info, Plus, Edit2, X, Save, Settings, LogIn, LogOut, Upload, Download, FileSpreadsheet, Loader2, Bell, BellOff, Volume2, VolumeX } from 'lucide-react';
+import { Search, History, BookOpen, Trash2, ArrowRight, Info, Plus, Edit2, X, Save, Settings, LogIn, LogOut, Upload, Download, FileSpreadsheet, Loader2, Bell, BellOff, Volume2, VolumeX, Globe, WifiOff, Cloud } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import * as XLSX from 'xlsx';
 import { initialWords, type WordEntry } from './data/initialWords.ts';
@@ -870,9 +870,51 @@ export default function App() {
               <div className="p-8 border border-[#1a1a1a] rounded-sm relative overflow-hidden bg-white shadow-[10px_10px_0px_#e5e2da]">
                 <span className="inline-block px-2 py-1 bg-[#1a1a1a] text-[#fdfbf7] text-[9px] uppercase tracking-widest mb-6 font-sans font-bold">Informasi</span>
                 <h3 className="text-4xl mb-4 leading-none italic">Kamus Pintar</h3>
-                <p className="text-sm leading-relaxed opacity-80 font-serif">
-                  Jelajahi kekayaan kosakata Indonesia dengan definisi akurat dan contoh penggunaan yang tepat. Basis data ini diperbarui secara berkala oleh tim administrator.
+                <p className="text-sm leading-relaxed opacity-80 font-serif mb-8">
+                  Jelajahi kekayaan kosakata Indonesia dengan definisi akurat dan contoh penggunaan yang tepat.
                 </p>
+
+                <div className="grid grid-cols-1 gap-4">
+                  <div className="flex items-start gap-3">
+                    <div className="p-2 bg-[#fdfbf7] border border-gray-100 rounded-sm">
+                      <Bell size={14} className="text-[#1a1a1a]" />
+                    </div>
+                    <div>
+                      <h4 className="text-[10px] font-sans font-bold uppercase tracking-wider mb-1">Automated Notification</h4>
+                      <p className="text-[10px] opacity-60 leading-tight">Dapatkan kosakata baru setiap hari pukul 08:00 WIB.</p>
+                    </div>
+                  </div>
+
+                  <div className="flex items-start gap-3">
+                    <div className="p-2 bg-[#fdfbf7] border border-gray-100 rounded-sm">
+                      <BookOpen size={14} className="text-[#1a1a1a]" />
+                    </div>
+                    <div>
+                      <h4 className="text-[10px] font-sans font-bold uppercase tracking-wider mb-1">Etimologi Kosa Kata</h4>
+                      <p className="text-[10px] opacity-60 leading-tight">Pelajari asal-usul dari setiap kosakata bahasa Indonesia.</p>
+                    </div>
+                  </div>
+
+                  <div className="flex items-start gap-3">
+                    <div className="p-2 bg-[#fdfbf7] border border-gray-100 rounded-sm">
+                      <WifiOff size={14} className="text-[#1a1a1a]" />
+                    </div>
+                    <div>
+                      <h4 className="text-[10px] font-sans font-bold uppercase tracking-wider mb-1">Offline Access</h4>
+                      <p className="text-[10px] opacity-60 leading-tight">Tetap bisa mencari meskipun tanpa koneksi internet data.</p>
+                    </div>
+                  </div>
+
+                  <div className="flex items-start gap-3">
+                    <div className="p-2 bg-[#fdfbf7] border border-gray-100 rounded-sm">
+                      <Cloud size={14} className="text-[#1a1a1a]" />
+                    </div>
+                    <div>
+                      <h4 className="text-[10px] font-sans font-bold uppercase tracking-wider mb-1">Cloud Sync</h4>
+                      <p className="text-[10px] opacity-60 leading-tight">Data disinkronkan secara otomatis ketika kembali online.</p>
+                    </div>
+                  </div>
+                </div>
               </div>
             )}
           </div>
@@ -994,24 +1036,24 @@ export default function App() {
                 key="result"
                 initial={{ opacity: 0, x: 20 }}
                 animate={{ opacity: 1, x: 0 }}
-                className="bg-white p-8 md:p-12 shadow-[15px_15px_0px_#e5e2da] md:shadow-[20px_20px_0px_#e5e2da] border border-[#e5e2da] flex flex-col min-h-[500px]"
+                className="bg-white p-6 md:p-8 shadow-[15px_15px_0px_#e5e2da] md:shadow-[20px_20px_0px_#e5e2da] border border-[#e5e2da] flex flex-col min-h-[400px]"
               >
-                <div className="mb-8 md:mb-12 flex justify-between items-start">
+                <div className="mb-6 md:mb-8 flex justify-between items-start">
                   <div>
-                    <div className="flex items-baseline gap-4 md:gap-6 mb-4 flex-wrap">
-                      <h2 className="text-5xl md:text-7xl font-light italic tracking-tight capitalize">{result.word}</h2>
+                    <div className="flex items-baseline gap-4 md:gap-6 mb-2 flex-wrap">
+                      <h2 className="text-4xl md:text-6xl font-light italic tracking-tight capitalize">{result.word}</h2>
                       <button 
                         onClick={() => handleSpeak(result.word, result.definition)}
-                        className={`p-3 rounded-full border transition-all ${isSpeaking ? 'bg-[#1a1a1a] text-white border-[#1a1a1a] animate-pulse' : 'bg-white text-[#1a1a1a] border-gray-100 hover:border-[#1a1a1a]'}`}
+                        className={`p-2 rounded-full border transition-all ${isSpeaking ? 'bg-[#1a1a1a] text-white border-[#1a1a1a] animate-pulse' : 'bg-white text-[#1a1a1a] border-gray-100 hover:border-[#1a1a1a]'}`}
                         title="Dengarkan Pengucapan"
                       >
-                        {isSpeaking ? <VolumeX size={24} /> : <Volume2 size={24} />}
+                        {isSpeaking ? <VolumeX size={20} /> : <Volume2 size={20} />}
                       </button>
-                      <span className="text-lg md:text-xl font-serif italic opacity-40">/{result.word.toLowerCase().split('').join('·')}/</span>
+                      <span className="text-base md:text-lg font-serif italic opacity-40">/{result.word.toLowerCase().split('').join('·')}/</span>
                     </div>
                     <div className="flex gap-2">
-                      <span className="px-3 py-1 border border-[#1a1a1a] text-[10px] font-sans font-bold uppercase tracking-widest leading-none flex items-center">{result.category}</span>
-                      <span className="px-3 py-1 border border-[#1a1a1a] text-[10px] font-sans font-bold uppercase tracking-widest leading-none flex items-center">Leksikon DB</span>
+                      <span className="px-2 py-0.5 border border-[#1a1a1a] text-[9px] font-sans font-bold uppercase tracking-widest leading-none flex items-center">{result.category}</span>
+                      <span className="px-2 py-0.5 border border-[#1a1a1a] text-[9px] font-sans font-bold uppercase tracking-widest leading-none flex items-center">Leksikon DB</span>
                     </div>
                   </div>
                   
@@ -1022,43 +1064,43 @@ export default function App() {
                           setEditForm(result);
                           setIsEditing(true);
                         }}
-                        className="p-3 border border-gray-200 text-gray-400 hover:text-blue-600 hover:border-blue-100 hover:bg-blue-50 transition-all"
+                        className="p-2 border border-gray-200 text-gray-400 hover:text-blue-600 hover:border-blue-100 hover:bg-blue-50 transition-all"
                         title="Edit Kata"
                       >
-                        <Edit2 size={18} />
+                        <Edit2 size={16} />
                       </button>
                       <button 
                         onClick={() => handleDeleteWord(result.word)}
-                        className="p-3 border border-gray-200 text-gray-400 hover:text-red-600 hover:border-red-100 hover:bg-red-50 transition-all"
+                        className="p-2 border border-gray-200 text-gray-400 hover:text-red-600 hover:border-red-100 hover:bg-red-50 transition-all"
                         title="Hapus Kata"
                       >
-                        <Trash2 size={18} />
+                        <Trash2 size={16} />
                       </button>
                     </div>
                   )}
                 </div>
 
-                <div className="flex-grow space-y-8 md:space-y-12">
+                <div className="flex-grow space-y-6 md:space-y-8">
                   <section>
-                    <h4 className="text-[10px] md:text-[11px] font-sans font-bold uppercase tracking-widest border-b border-gray-100 pb-3 mb-4 md:mb-6">Asal Usul Kata</h4>
-                    <p className="text-xl md:text-2xl italic font-serif text-gray-600">
+                    <h4 className="text-[9px] md:text-[10px] font-sans font-bold uppercase tracking-widest border-b border-gray-100 pb-2 mb-3 md:mb-4">Asal Usul Kata</h4>
+                    <p className="text-lg md:text-xl italic font-serif text-gray-600">
                       {result.etymology || 'Informasi etimologi belum tersedia.'}
                     </p>
                   </section>
 
                   <section>
-                    <h4 className="text-[10px] md:text-[11px] font-sans font-bold uppercase tracking-widest border-b border-gray-100 pb-3 mb-4 md:mb-6">Definisi</h4>
-                    <p className="text-2xl md:text-3xl leading-snug font-serif text-gray-900">
+                    <h4 className="text-[9px] md:text-[10px] font-sans font-bold uppercase tracking-widest border-b border-gray-100 pb-2 mb-3 md:mb-4">Definisi</h4>
+                    <p className="text-xl md:text-2xl leading-snug font-serif text-gray-900">
                       {result.definition}
                     </p>
                   </section>
 
                   <section>
-                    <h4 className="text-[10px] md:text-[11px] font-sans font-bold uppercase tracking-widest border-b border-gray-100 pb-3 mb-4 md:mb-6">Contoh Penggunaan</h4>
-                    <div className="space-y-6 md:space-y-8">
+                    <h4 className="text-[9px] md:text-[10px] font-sans font-bold uppercase tracking-widest border-b border-gray-100 pb-2 mb-3 md:mb-4">Contoh Penggunaan</h4>
+                    <div className="space-y-4 md:space-y-6">
                       {result.examples.map((example, idx) => example && (
-                        <p key={idx} className="text-lg md:text-xl italic leading-relaxed text-gray-700 relative pl-8 md:pl-10">
-                          <span className="absolute left-0 top-0 text-3xl md:text-5xl opacity-20 font-serif leading-none">“</span>
+                        <p key={idx} className="text-base md:text-lg italic leading-relaxed text-gray-700 relative pl-6 md:pl-8">
+                          <span className="absolute left-0 top-0 text-2xl md:text-4xl opacity-20 font-serif leading-none">“</span>
                           {example}
                         </p>
                       ))}
@@ -1066,19 +1108,19 @@ export default function App() {
                   </section>
                 </div>
 
-                <div className="mt-16 pt-8 flex border-t border-gray-100 justify-between items-center">
+                <div className="mt-8 pt-6 flex border-t border-gray-100 justify-between items-center">
                   <div className="flex gap-4">
                     <button 
                       onClick={() => {
                         setResult(null);
                         setSearchQuery('');
                       }}
-                      className="px-6 py-2 bg-[#1a1a1a] text-white text-[10px] font-sans font-bold uppercase tracking-widest hover:bg-gray-800 transition-all"
+                      className="px-5 py-2 bg-[#1a1a1a] text-white text-[9px] font-sans font-bold uppercase tracking-widest hover:bg-gray-800 transition-all"
                     >
                       Tutup
                     </button>
                   </div>
-                  <div className="text-[10px] font-sans italic opacity-40">Terakhir diperbarui: {new Date().toLocaleDateString('id-ID')}</div>
+                  <div className="text-[9px] font-sans italic opacity-40">Terakhir diperbarui: {new Date().toLocaleDateString('id-ID')}</div>
                 </div>
               </motion.div>
             ) : (
