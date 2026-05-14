@@ -15,27 +15,37 @@ const firebaseConfig = (function() {
   }
 })();
 
-let app: any;
-let db: any;
-let auth: any;
+let app: any = null;
+let db: any = null;
+let auth: any = null;
 
 try {
-  if (firebaseConfig && Object.keys(firebaseConfig).length > 0 && (firebaseConfig as any).apiKey) {
+  if (firebaseConfig && firebaseConfig.apiKey && firebaseConfig.projectId) {
     app = initializeApp(firebaseConfig);
     
-    // Initialize Firestore with persistent cache instead of using enableIndexedDbPersistence
-    db = initializeFirestore(app, {
-      localCache: persistentLocalCache({
-        tabManager: persistentMultipleTabManager()
-      })
-    }, (firebaseConfig as any).firestoreDatabaseId);
+    // Initialize Firestore with persistent cache
+    try {
+      db = initializeFirestore(app, {
+        localCache: persistentLocalCache({
+          tabManager: persistentMultipleTabManager()
+        })
+      }, (firebaseConfig as any).firestoreDatabaseId);
+    } catch (e) {
+      console.warn("Firestore initialization with cache failed, falling back to basic:", e);
+      // Fallback to basic initialization
+      db = initializeFirestore(app, {});
+    }
 
-    auth = getAuth(app);
+    try {
+      auth = getAuth(app);
+    } catch (e) {
+      console.warn("Auth initialization failed:", e);
+    }
   } else {
-    console.warn("Firebase configuration is incomplete. Database features will not work.");
+    console.warn("Firebase configuration is missing or incomplete (apiKey/projectId). Database features will not work.");
   }
 } catch (error) {
-  console.error("Failed to initialize Firebase:", error);
+  console.error("Critical Firebase error:", error);
 }
 
 export { db, auth };
@@ -59,11 +69,11 @@ export enum OperationType {
 export function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null) {
   const errInfo = {
     error: error instanceof Error ? error.message : String(error),
-    authInfo: {
-      userId: auth.currentUser?.uid,
-      email: auth.currentUser?.email,
-      emailVerified: auth.currentUser?.emailVerified,
-    },
+    authInfo: auth?.currentUser ? {
+      userId: auth.currentUser.uid,
+      email: auth.currentUser.email,
+      emailVerified: auth.currentUser.emailVerified,
+    } : null,
     operationType,
     path
   };

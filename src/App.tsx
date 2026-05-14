@@ -3,14 +3,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-/**
- * @license
- * SPDX-License-Identifier: Apache-2.0
- */
-
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, Component, ErrorInfo, ReactNode } from 'react';
 import { Search, History, BookOpen, Trash2, ArrowRight, Plus, Edit2, X, Save, Settings, LogIn, LogOut, Upload, Download, Loader2, Bell, BellOff, Volume2, VolumeX, WifiOff, Cloud } from 'lucide-react';
-import { motion, AnimatePresence } from 'motion/react';
 import * as XLSX from 'xlsx';
 import { initialWords, type WordEntry } from './data/initialWords.ts';
 import { 
@@ -18,7 +12,52 @@ import {
   OperationType, handleFirestoreError 
 } from './lib/firebase.ts';
 
+// Simple Error Boundary
+class ErrorBoundary extends Component<{ children: ReactNode }, { hasError: boolean, error: Error | null }> {
+  constructor(props: { children: ReactNode }) {
+    super(props);
+    this.state = { hasError: false, error: null };
+  }
+
+  static getDerivedStateFromError(error: Error) {
+    return { hasError: true, error };
+  }
+
+  componentDidCatch(error: Error, errorInfo: ErrorInfo) {
+    console.error("CRITICAL ERROR:", error, errorInfo);
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div style={{ padding: '20px', textAlign: 'center', background: '#fdfbf7', minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column' }}>
+          <h1 style={{ fontFamily: 'sans-serif', textTransform: 'uppercase' }}>Sepertinya ada masalah teknis</h1>
+          <p style={{ fontStyle: 'italic', opacity: 0.6 }}>{this.state.error?.message}</p>
+          <button 
+            onClick={() => {
+              localStorage.clear();
+              window.location.reload();
+            }}
+            style={{ padding: '10px 20px', background: '#1a1a1a', color: 'white', border: 'none', cursor: 'pointer', marginTop: '20px' }}
+          >
+            Reset dan Muat Ulang
+          </button>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
 export default function App() {
+  return (
+    <ErrorBoundary>
+      <MainApp />
+    </ErrorBoundary>
+  );
+}
+
+function MainApp() {
   const [searchQuery, setSearchQuery] = useState('');
   const [isAdmin, setIsAdmin] = useState(false);
   const [user, setUser] = useState<any>(null);
@@ -59,7 +98,7 @@ export default function App() {
     if (savedUser) {
       try {
         const u = JSON.parse(savedUser);
-        if (u.email === 'yokotenkaizen@gmail.com') {
+        if (u && u.email === 'yokotenkaizen@gmail.com') {
           setUser(u);
           setIsAdmin(true);
         }
@@ -176,6 +215,7 @@ export default function App() {
 
   // Listen for Firestore updates - Limited to prevent over-fetching thousands of words
   useEffect(() => {
+    if (!db) return;
     // Only fetch limited number of words for initial display/metadata
     // Using a larger limit for better offline search coverage
     const q = query(collection(db, 'words'), limit(5000));
@@ -196,6 +236,7 @@ export default function App() {
 
   // Listen for global stats
   useEffect(() => {
+    if (!db) return;
     const docRef = doc(db, 'stats', 'global');
     const unsubscribe = onSnapshot(docRef, (snapshot) => {
       if (snapshot.exists()) {
@@ -223,6 +264,10 @@ export default function App() {
 
   // Excel Export Current Data
   const downloadCurrentData = async () => {
+    if (!db) {
+      alert("Basis data tidak tersedia.");
+      return;
+    }
     setIsProcessing(true);
     try {
       // Fetch all words for export
@@ -266,6 +311,10 @@ export default function App() {
 
     const reader = new FileReader();
     reader.onload = async (evt) => {
+      if (!db) {
+        alert("Basis data tidak tersedia.");
+        return;
+      }
       setIsProcessing(true);
       setError("Sedang memproses file Excel...");
       
@@ -359,6 +408,7 @@ export default function App() {
     
     // Increment global install count
     const incrementInstall = async () => {
+      if (!db) return;
       try {
         await setDoc(doc(db, 'stats', 'global'), {
           totalInstalls: increment(1)
@@ -407,7 +457,7 @@ export default function App() {
       let found = words.find(w => w.word.toLowerCase() === trimmedQuery);
       
       // 2. Fetch from Firestore (will use local cache if offline)
-      if (!found) {
+      if (!found && db) {
         const docRef = doc(db, 'words', trimmedQuery);
         try {
           const docSnap = await getDoc(docRef);
@@ -425,11 +475,13 @@ export default function App() {
         addToHistory(trimmedQuery);
         
         // 3. Increment global search count (Backgrounded, Firestore handles offline queueing)
-        setDoc(doc(db, 'stats', 'global'), {
-          totalSearches: increment(1)
-        }, { merge: true }).catch(e => {
-          console.warn("Search count increment queued or failed:", e.message);
-        });
+        if (found && db) {
+          setDoc(doc(db, 'stats', 'global'), {
+            totalSearches: increment(1)
+          }, { merge: true }).catch(e => {
+            console.warn("Search count increment queued or failed:", e.message);
+          });
+        }
       } else {
         if (isOffline) {
           setError('Maaf, kata ini belum ada di memori offline. Hubungkan ke internet untuk mencarinya.');
@@ -459,6 +511,11 @@ export default function App() {
       alert("Harap login untuk menyimpan perubahan.");
       return;
     }
+
+    if (!db) {
+      alert("Basis data tidak tersedia. Perubahan tidak dapat disimpan.");
+      return;
+    }
     
     const wordId = editForm.word.toLowerCase();
     try {
@@ -480,6 +537,10 @@ export default function App() {
 
   const handleDeleteWord = async (word: string) => {
     if (!user) return;
+    if (!db) {
+      alert("Basis data tidak tersedia.");
+      return;
+    }
     if (window.confirm(`Hapus kata "${word}" dari database?`)) {
       const wordId = word.toLowerCase();
       try {
@@ -561,6 +622,7 @@ export default function App() {
         displayName: 'Administrator',
         isManual: true 
       };
+      console.log("Login successful, setting admin state...");
       setUser(adminUser);
       setIsAdmin(true);
       localStorage.setItem('leksikon_admin_session', JSON.stringify(adminUser));
@@ -603,15 +665,11 @@ export default function App() {
         </div>
         <div className="flex flex-wrap gap-2 md:gap-4 text-[10px] font-sans font-bold uppercase tracking-widest mt-6 md:mt-0 items-center justify-center md:justify-end">
             {isOffline && (
-              <motion.div 
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                className="flex items-center gap-2 px-3 py-1.5 border border-red-100 bg-red-50 text-red-600 rounded-sm"
-              >
-                <div className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse"></div>
-                <span className="text-[9px]">Offline</span>
-              </motion.div>
-            )}
+        <div className="flex items-center gap-2 px-3 py-1.5 border border-red-100 bg-red-50 text-red-600 rounded-sm">
+          <div className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse"></div>
+          <span className="text-[9px]">Offline</span>
+        </div>
+      )}
             <button 
               onClick={toggleNotifications}
               className={`flex items-center gap-2 px-3 py-1.5 border rounded-sm transition-all ${notificationsEnabled ? 'bg-amber-50 border-amber-200 text-amber-700' : 'border-gray-200 text-gray-400 hover:border-[#1a1a1a] hover:text-[#1a1a1a]'}`}
@@ -691,27 +749,22 @@ export default function App() {
             </div>
             
             {/* Autocomplete Suggestions */}
-            <AnimatePresence>
-              {showSuggestions && suggestions.length > 0 && (
-                <motion.div 
-                  initial={{ opacity: 0, y: -10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: -10 }}
-                  className="absolute z-40 left-0 right-0 top-full mt-2 bg-white border border-gray-200 shadow-xl rounded-sm overflow-hidden"
-                >
-                  {suggestions.map((s, idx) => (
-                    <button
-                      key={idx}
-                      onClick={() => handleSearch(s.word)}
-                      className="w-full text-left px-4 py-3 hover:bg-[#fdfbf7] flex items-center justify-between group transition-colors"
-                    >
-                      <span className="font-serif italic text-lg capitalize">{s.word}</span>
-                      <ArrowRight size={14} className="opacity-0 group-hover:opacity-30 transform -translate-x-2 group-hover:translate-x-0 transition-all" />
-                    </button>
-                  ))}
-                </motion.div>
-              )}
-            </AnimatePresence>
+            {showSuggestions && suggestions.length > 0 && (
+              <div 
+                className="absolute z-40 left-0 right-0 top-full mt-2 bg-white border border-gray-200 shadow-xl rounded-sm overflow-hidden"
+              >
+                {suggestions.map((s, idx) => (
+                  <button
+                    key={idx}
+                    onClick={() => handleSearch(s.word)}
+                    className="w-full text-left px-4 py-3 hover:bg-[#fdfbf7] flex items-center justify-between group transition-colors"
+                  >
+                    <span className="font-serif italic text-lg capitalize">{s.word}</span>
+                    <ArrowRight size={14} className="opacity-0 group-hover:opacity-30 transform -translate-x-2 group-hover:translate-x-0 transition-all" />
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
 
           {isAdmin && (
@@ -742,11 +795,11 @@ export default function App() {
                   <div className="grid grid-cols-2 gap-4 border-t border-gray-50 pt-3">
                     <div>
                       <p className="text-[8px] font-sans font-bold uppercase tracking-[0.2em] opacity-40 mb-1">Total Pencarian</p>
-                      <p className="text-lg font-bold font-sans">{stats.totalSearches.toLocaleString('id-ID')}</p>
+                      <p className="text-lg font-bold font-sans">{(stats?.totalSearches || 0).toLocaleString()}</p>
                     </div>
                     <div>
                       <p className="text-[8px] font-sans font-bold uppercase tracking-[0.2em] opacity-40 mb-1">Total Instalasi</p>
-                      <p className="text-lg font-bold font-sans">{stats.totalInstalls.toLocaleString('id-ID')}</p>
+                      <p className="text-lg font-bold font-sans">{(stats?.totalInstalls || 0).toLocaleString()}</p>
                     </div>
                   </div>
                 </div>
@@ -789,6 +842,10 @@ export default function App() {
                 {words.length === 0 && (
                   <button 
                     onClick={() => {
+                      if (!db) {
+                        alert("Basis data tidak tersedia.");
+                        return;
+                      }
                       if(window.confirm('Impor 150 kata contoh ke database?')) {
                         const seed = async () => {
                           setIsProcessing(true);
@@ -924,13 +981,9 @@ export default function App() {
 
         {/* Right Column: Definition View */}
         <div className="md:col-span-8">
-          <AnimatePresence mode="wait">
+          <React.Fragment>
             {isEditing ? (
-              <motion.div 
-                key="edit-form"
-                initial={{ opacity: 0, scale: 0.98 }}
-                animate={{ opacity: 1, scale: 1 }}
-                exit={{ opacity: 0, scale: 0.98 }}
+              <div 
                 className="bg-white p-12 shadow-[20px_20px_0px_#e5e2da] border border-[#e5e2da] flex flex-col space-y-8"
               >
                 <div className="flex justify-between items-center border-b border-gray-100 pb-6">
@@ -1008,14 +1061,9 @@ export default function App() {
                     <Save size={16} /> Simpan ke Basis Data
                   </button>
                 </div>
-              </motion.div>
+              </div>
             ) : error ? (
-              <motion.div 
-                key="error"
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                className="bg-red-50 border border-red-200 p-12 rounded-sm text-center"
-              >
+              <div className="bg-red-50 border border-red-200 p-12 rounded-sm text-center">
                 <div className="max-w-xs mx-auto">
                   <h3 className="font-sans font-bold text-xs uppercase tracking-widest text-red-900 mb-4">Tidak Ditemukan</h3>
                   <p className="text-red-800 italic text-2xl mb-8 leading-relaxed">"{searchQuery}" belum terdaftar dalam leksikon kami.</p>
@@ -1032,12 +1080,9 @@ export default function App() {
                     </button>
                   )}
                 </div>
-              </motion.div>
+              </div>
             ) : result ? (
-              <motion.div 
-                key="result"
-                initial={{ opacity: 0, x: 20 }}
-                animate={{ opacity: 1, x: 0 }}
+              <div
                 className="bg-white p-6 md:p-8 shadow-[15px_15px_0px_#e5e2da] md:shadow-[20px_20px_0px_#e5e2da] border border-[#e5e2da] flex flex-col min-h-[400px]"
               >
                 <div className="mb-6 md:mb-8 flex justify-between items-start">
@@ -1124,7 +1169,7 @@ export default function App() {
                   </div>
                   <div className="text-[9px] font-sans italic opacity-40">Terakhir diperbarui: {new Date().toLocaleDateString('id-ID')}</div>
                 </div>
-              </motion.div>
+              </div>
             ) : (
               <div className="h-full flex items-center justify-center border-2 border-dashed border-gray-200 rounded-sm p-12 text-center">
                 <div className="max-w-xs">
@@ -1133,27 +1178,20 @@ export default function App() {
                 </div>
               </div>
             )}
-          </AnimatePresence>
+          </React.Fragment>
         </div>
       </main>
 
       {/* Login Modal */}
-      <AnimatePresence>
-        {showLoginModal && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-            <motion.div 
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              onClick={() => setShowLoginModal(false)}
-              className="absolute inset-0 bg-[#1a1a1a]/40 backdrop-blur-sm"
-            />
-            <motion.div 
-              initial={{ opacity: 0, y: 20, scale: 0.95 }}
-              animate={{ opacity: 1, y: 0, scale: 1 }}
-              exit={{ opacity: 0, y: 20, scale: 0.95 }}
-              className="relative bg-white w-full max-w-md p-8 shadow-2xl border border-[#1a1a1a] rounded-sm"
-            >
+      {showLoginModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div 
+            onClick={() => setShowLoginModal(false)}
+            className="absolute inset-0 bg-[#1a1a1a]/40 backdrop-blur-sm"
+          />
+          <div 
+            className="relative bg-white w-full max-w-md p-8 shadow-2xl border border-[#1a1a1a] rounded-sm"
+          >
               <div className="flex justify-between items-center mb-8">
                 <h2 className="text-2xl font-black uppercase tracking-tighter font-sans">Masuk Admin</h2>
                 <button onClick={() => setShowLoginModal(false)} className="text-gray-400 hover:text-[#1a1a1a]">
@@ -1204,10 +1242,9 @@ export default function App() {
                   </p>
                 </div>
               </form>
-            </motion.div>
+            </div>
           </div>
         )}
-      </AnimatePresence>
 
       {/* Decorative BG element */}
       <div className="fixed top-0 right-0 p-8 pointer-events-none opacity-[0.03] overflow-hidden select-none">
