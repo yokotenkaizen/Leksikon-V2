@@ -134,6 +134,41 @@ function MainApp() {
     };
   }, []);
 
+  // Handle word links from notifications/URL
+  useEffect(() => {
+    const handleInboundWord = (word: string) => {
+      if (word) {
+        handleSearch(word);
+      }
+    };
+
+    // 1. Handle URL parameter
+    const params = new URLSearchParams(window.location.search);
+    const urlWord = params.get('word');
+    if (urlWord) {
+      handleInboundWord(urlWord);
+      // Clean up URL without refreshing
+      window.history.replaceState({}, '', '/');
+    }
+
+    // 2. Handle Message from Service Worker
+    const messageHandler = (event: MessageEvent) => {
+      if (event.data && event.data.type === 'OPEN_WORD') {
+        handleInboundWord(event.data.word);
+      }
+    };
+
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.addEventListener('message', messageHandler);
+    }
+
+    return () => {
+      if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.removeEventListener('message', messageHandler);
+      }
+    };
+  }, [words, db]); // Re-run if words or db changes to ensure handleSearch has context if needed
+
   // Speech Voices Pre-loading & Synthesis Cleanup
   useEffect(() => {
     const loadVoices = () => {
@@ -150,22 +185,51 @@ function MainApp() {
     };
   }, []);
 
+  const sendNotification = async (title: string, options?: NotificationOptions) => {
+    if (!("Notification" in window)) return;
+    
+    if (Notification.permission === "granted") {
+      try {
+        // Try using Service Worker registration (preferred for PWAs/Mobile)
+        if ('serviceWorker' in navigator) {
+          const registration = await navigator.serviceWorker.ready;
+          if (registration && registration.showNotification) {
+            await registration.showNotification(title, options);
+            return;
+          }
+        }
+        // Fallback to standard constructor (if available and not failing)
+        try {
+          new Notification(title, options);
+        } catch (e) {
+          console.warn("Notification constructor failed (Illegal constructor?), falling back to console:", e);
+        }
+      } catch (err) {
+        console.error("Critical Notification error:", err);
+      }
+    }
+  };
+
   const toggleNotifications = async () => {
     if (notificationsEnabled) {
       setNotificationsEnabled(false);
       localStorage.setItem('leksikon_notifications', 'disabled');
     } else {
-      const permission = await Notification.requestPermission();
-      if (permission === 'granted') {
-        setNotificationsEnabled(true);
-        localStorage.setItem('leksikon_notifications', 'enabled');
-        
-        new Notification('Leksikon Digital', {
-          body: 'Notifikasi harian Leksikon telah diaktifkan! Anda akan menerima kata baru setiap hari pukul 08.00 WIB.',
-          icon: '/android-chrome-192x192.png'
-        });
-      } else {
-        alert('Mohon izinkan notifikasi pada browser untuk fitur ini.');
+      try {
+        const permission = await Notification.requestPermission();
+        if (permission === 'granted') {
+          setNotificationsEnabled(true);
+          localStorage.setItem('leksikon_notifications', 'enabled');
+          
+          await sendNotification('Leksikon Digital', {
+            body: 'Notifikasi harian Leksikon telah diaktifkan! Anda akan menerima kata baru setiap hari pukul 08.00 WIB.',
+            icon: '/logo.png'
+          });
+        } else {
+          alert('Mohon izinkan notifikasi pada browser untuk fitur ini.');
+        }
+      } catch (e) {
+        console.error("Error requesting notification permission:", e);
       }
     }
   };
@@ -174,7 +238,7 @@ function MainApp() {
   useEffect(() => {
     if (!notificationsEnabled) return;
 
-    const checkDailyNotif = () => {
+    const checkDailyNotif = async () => {
       const now = new Date();
       // WIB Offset (UTC+7)
       const hour = now.getUTCHours() + 7;
@@ -187,19 +251,13 @@ function MainApp() {
         const index = Math.floor(Math.random() * words.length);
         const randomWord = words[index];
         
-        const notification = new Notification('📖 Leksikon: Kata Hari Ini', {
+        await sendNotification('📖 Leksikon: Kata Hari Ini', {
           body: `${randomWord.word.toUpperCase()}: ${randomWord.definition}`,
           icon: '/logo.png',
           badge: '/logo.png',
-          tag: 'daily-word'
+          tag: 'daily-word',
+          data: { word: randomWord.word.toLowerCase() }
         });
-
-        notification.onclick = () => {
-          window.focus();
-          setResult(randomWord);
-          addToHistory(randomWord.word.toLowerCase());
-          setSearchQuery(randomWord.word.toLowerCase());
-        };
 
         localStorage.setItem('last_notif_sent', today);
       }

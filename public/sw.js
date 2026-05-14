@@ -63,3 +63,30 @@ self.addEventListener('fetch', (event) => {
     })
   );
 });
+
+// Handle notification click
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close();
+  
+  const word = event.notification.data?.word;
+  const urlToOpen = word ? `/?word=${word}` : '/';
+
+  event.waitUntil(
+    clients.matchAll({ type: 'window', includeUncontrolled: true }).then((windowClients) => {
+      // Check if there is already a window open
+      for (let i = 0; i < windowClients.length; i++) {
+        const client = windowClients[i];
+        if (client.url.includes(self.location.origin) && 'focus' in client) {
+          if (word) {
+            client.postMessage({ type: 'OPEN_WORD', word: word });
+          }
+          return client.focus();
+        }
+      }
+      // If no window is open, open a new one
+      if (clients.openWindow) {
+        return clients.openWindow(urlToOpen);
+      }
+    })
+  );
+});
