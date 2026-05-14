@@ -171,8 +171,10 @@ function MainApp() {
 
   // Speech Voices Pre-loading & Synthesis Cleanup
   useEffect(() => {
+    if (!window.speechSynthesis) return;
+
     const loadVoices = () => {
-      window.speechSynthesis.getVoices();
+      if (window.speechSynthesis) window.speechSynthesis.getVoices();
     };
     
     loadVoices();
@@ -181,7 +183,7 @@ function MainApp() {
     }
 
     return () => {
-      window.speechSynthesis.cancel();
+      if (window.speechSynthesis) window.speechSynthesis.cancel();
     };
   }, []);
 
@@ -267,7 +269,7 @@ function MainApp() {
     checkDailyNotif(); // Run once on load
     return () => {
       clearInterval(interval);
-      window.speechSynthesis.cancel();
+      if (window.speechSynthesis) window.speechSynthesis.cancel();
     };
   }, [notificationsEnabled, words]);
 
@@ -612,6 +614,11 @@ function MainApp() {
   };
 
   const handleSpeak = (text: string, subText: string) => {
+    if (!window.speechSynthesis) {
+      alert("Fitur suara tidak didukung di perangkat ini.");
+      return;
+    }
+
     if (isSpeaking) {
       window.speechSynthesis.cancel();
       setIsSpeaking(false);
@@ -622,11 +629,18 @@ function MainApp() {
     window.speechSynthesis.cancel();
 
     // Buat utterance baru
-    const utterance = new SpeechSynthesisUtterance(`${text}. Definisi: ${subText}`);
+    const UtteranceClass = window.SpeechSynthesisUtterance || (window as any).webkitSpeechSynthesisUtterance;
+    if (!UtteranceClass) {
+      alert("Fitur suara tidak didukung di perangkat ini.");
+      return;
+    }
+
+    const utterance = new UtteranceClass(`${text}. Definisi: ${subText}`);
     utterance.lang = 'id-ID';
     
     // Pencarian suara Bahasa Indonesia secara asinkron atau langsung
     const setVoice = () => {
+      if (!window.speechSynthesis) return;
       const voices = window.speechSynthesis.getVoices();
       const idVoice = voices.find(v => v.lang === 'id-ID') || 
                       voices.find(v => v.lang === 'id_ID') || 

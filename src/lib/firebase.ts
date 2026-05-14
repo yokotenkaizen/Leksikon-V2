@@ -15,7 +15,7 @@ const firebaseConfig = (function() {
   }
 })();
 
-let app: any = null;
+let app: any;
 let db: any = null;
 let auth: any = null;
 
