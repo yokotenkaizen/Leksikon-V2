@@ -1,10 +1,9 @@
-const CACHE_NAME = 'leksikon-pwa-cache-v2';
+const CACHE_NAME = 'leksikon-pwa-cache-v3';
 const ASSETS_TO_CACHE = [
   '/',
   '/index.html',
   '/manifest.json',
-  '/logo.png',
-  '/data/initialWords.ts'
+  '/logo.png'
 ];
 
 // Installas SW dan cache assets
