@@ -449,12 +449,30 @@ function MainApp() {
     localStorage.setItem('kamus_history', JSON.stringify(history));
   }, [history]);
 
+  // Increment global install count
+  const incrementInstall = async () => {
+    if (!db) return;
+    try {
+      await setDoc(doc(db, 'stats', 'global'), {
+        totalInstalls: increment(1)
+      }, { merge: true });
+    } catch (e) {
+      console.warn("Failed to increment install count:", e);
+    }
+  };
+
   useEffect(() => {
     // Cek apakah mobile
     const checkMobile = () => {
       return /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
     };
-    setIsMobile(checkMobile());
+    const mob = checkMobile();
+    setIsMobile(mob);
+    
+    // Always show install button on mobile for APK download
+    if (mob) {
+      setShowInstallBtn(true);
+    }
 
     const handler = (e: any) => {
       e.preventDefault();
@@ -464,18 +482,6 @@ function MainApp() {
     
     window.addEventListener('beforeinstallprompt', handler);
     
-    // Increment global install count
-    const incrementInstall = async () => {
-      if (!db) return;
-      try {
-        await setDoc(doc(db, 'stats', 'global'), {
-          totalInstalls: increment(1)
-        }, { merge: true });
-      } catch (e) {
-        console.warn("Failed to increment install count:", e);
-      }
-    };
-
     // Jika PWA sudah terinstal
     window.addEventListener('appinstalled', () => {
       setShowInstallBtn(false);
@@ -486,19 +492,10 @@ function MainApp() {
     return () => window.removeEventListener('beforeinstallprompt', handler);
   }, []);
 
-  const handleInstallApp = async () => {
-    if (!deferredPrompt) {
-      // Jika prompt otomatis tidak tersedia, beri instruksi manual
-      alert("Untuk memasang aplikasi di Android:\n1. Klik ikon titik tiga di pojok kanan atas browser.\n2. Pilih 'Tambahkan ke Layar Utama' atau 'Instal Aplikasi'.");
-      return;
-    }
-    deferredPrompt.prompt();
-    const { outcome } = await deferredPrompt.userChoice;
-    
-    if (outcome === 'accepted') {
-      setShowInstallBtn(false);
-    }
-    setDeferredPrompt(null);
+  const handleInstallApp = () => {
+    // Lead user to APK download link as requested
+    window.open('https://kodular.app/PSY-FLG', '_blank');
+    incrementInstall();
   };
 
   const handleSearch = async (queryStr: string = searchQuery) => {
@@ -741,7 +738,7 @@ function MainApp() {
               <button 
                 onClick={handleInstallApp}
                 className="flex items-center gap-2 px-3 py-1.5 border border-[#1a1a1a] text-[#1a1a1a] rounded-sm hover:bg-[#1a1a1a] hover:text-white transition-all"
-                title="Pasang Aplikasi (PWA)"
+                title="Pasang Aplikasi"
               >
                 <Download size={12} /> Instal App
               </button>
@@ -761,7 +758,7 @@ function MainApp() {
               <button 
                 onClick={handleInstallApp}
                 className="flex items-center gap-2 px-3 py-1.5 border border-[#1a1a1a] text-[#1a1a1a] rounded-sm hover:bg-[#1a1a1a] hover:text-white transition-all"
-                title="Pasang Aplikasi (PWA)"
+                title="Pasang Aplikasi"
               >
                 <Download size={12} /> Instal App
               </button>
