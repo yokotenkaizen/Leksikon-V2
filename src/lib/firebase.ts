@@ -1,15 +1,15 @@
 import { initializeApp } from 'firebase/app';
 import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, signInWithEmailAndPassword, createUserWithEmailAndPassword } from 'firebase/auth';
 import { 
-  getFirestore, collection, doc, setDoc, getDoc, getDocs, updateDoc, deleteDoc, query, where, limit, onSnapshot, getDocFromServer, increment,
-  enableIndexedDbPersistence
+  initializeFirestore, persistentLocalCache, persistentMultipleTabManager,
+  collection, doc, setDoc, getDoc, getDocs, updateDoc, deleteDoc, query, where, limit, onSnapshot, getDocFromServer, increment
 } from 'firebase/firestore';
 import rawConfig from '../../firebase-applet-config.json';
 
 const firebaseConfig = (function() {
   try {
     return rawConfig;
-  } catch (e) {
+  } catch (_e) {
     console.error("Firebase config file missing or unreadable.");
     return {} as any;
   }
@@ -22,21 +22,15 @@ let auth: any;
 try {
   if (firebaseConfig && Object.keys(firebaseConfig).length > 0 && (firebaseConfig as any).apiKey) {
     app = initializeApp(firebaseConfig);
-    db = getFirestore(app, (firebaseConfig as any).firestoreDatabaseId);
-    auth = getAuth(app);
+    
+    // Initialize Firestore with persistent cache instead of using enableIndexedDbPersistence
+    db = initializeFirestore(app, {
+      localCache: persistentLocalCache({
+        tabManager: persistentMultipleTabManager()
+      })
+    }, (firebaseConfig as any).firestoreDatabaseId);
 
-    // Enable persistence for offline mode
-    if (typeof window !== 'undefined') {
-      enableIndexedDbPersistence(db).catch((err) => {
-        if (err.code === 'failed-precondition') {
-          // Multiple tabs open, persistence can only be enabled in one tab at a time.
-          console.warn('Persistence failed-precondition');
-        } else if (err.code === 'unimplemented') {
-          // The current browser does not support all of the features needed to enable persistence
-          console.warn('Persistence unimplemented');
-        }
-      });
-    }
+    auth = getAuth(app);
   } else {
     console.warn("Firebase configuration is incomplete. Database features will not work.");
   }

@@ -1,52 +1,87 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    // Helper functions
+    
+    // 0. Global Safety Net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // --- PHASE 3: Primitives ---
+    
     function isSignedIn() {
       return request.auth != null;
     }
 
-    function isEmailVerified() {
-      return request.auth.token.email_verified == true;
+    function isVerified() {
+      return isSignedIn() && request.auth.token.email_verified == true;
     }
 
     function isAdmin() {
-      return isSignedIn() && request.auth.token.email == 'yokotenkaizen@gmail.com';
+      return isVerified() && request.auth.token.email == 'yokotenkaizen@gmail.com';
     }
 
     function isValidId(id) {
       return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
     }
 
-    function isValidWord(data) {
-      return data.word is string && data.word.size() > 0 && data.word.size() <= 200
-          && data.category is string && data.category.size() > 0 && data.category.size() <= 100
-          && data.definition is string && data.definition.size() > 0 && data.definition.size() <= 3000
-          && data.examples is list && data.examples.size() <= 20;
+    function incoming() {
+      return request.resource.data;
     }
 
-    // Default deny
-    match /{document=**} {
-      allow read, write: if false;
+    function existing() {
+      return resource.data;
     }
+
+    // --- PHASE 4: Validation Blueprints ---
+
+    function isValidWord(data) {
+      return data.keys().hasAll(['word', 'category', 'definition', 'examples', 'updatedAt'])
+        && data.keys().size() <= 6 // Allow optional etymology
+        && data.word is string && data.word.size() > 0 && data.word.size() <= 100
+        && data.category is string && data.category.size() > 0 && data.category.size() <= 50
+        && data.definition is string && data.definition.size() > 0 && data.definition.size() <= 2000
+        && data.examples is list && data.examples.size() <= 10
+        && (data.get('etymology', '') is string && data.get('etymology', '').size() <= 1000)
+        && data.updatedAt is string; // Date-time format
+    }
+
+    function isValidStatsUpdate() {
+      // Only allow numeric increments for totalSearches and totalInstalls
+      let affected = incoming().diff(existing()).affectedKeys();
+      return affected.hasOnly(['totalSearches', 'totalInstalls'])
+        && (!incoming().diff(existing()).changedKeys().contains('totalSearches') || incoming().totalSearches > existing().totalSearches)
+        && (!incoming().diff(existing()).changedKeys().contains('totalInstalls') || incoming().totalInstalls > existing().totalInstalls);
+    }
+
+    // --- PHASE 5: Collections ---
 
     // Words collection
     match /words/{wordId} {
-      // Siapa pun bisa membaca dan mencari kata
-      allow get: if true;
-      allow list: if true;
+      allow read: if true;
       
-      // NOTE: Permissive rules to support manual admin login bypass requested by user
-      allow create, update, delete: if true;
+      allow create: if isAdmin() && isValidId(wordId) && isValidWord(incoming());
+      
+      allow update: if isAdmin() && isValidWord(incoming());
+      
+      allow delete: if isAdmin();
     }
 
     // Stats collection
     match /stats/{statId} {
-      allow get: if true;
-      // Memungkinkan update field totalSearches dan totalInstalls oleh siapa pun
-      allow update: if request.resource.data.diff(resource.data).affectedKeys().hasAny(['totalSearches', 'totalInstalls']);
-      // Allow create if it doesn't exist
-      allow create: if true;
+      allow read: if true;
+      
+      allow create: if isSignedIn() && isValidId(statId) 
+        && incoming().keys().hasAll(['totalSearches', 'totalInstalls'])
+        && incoming().totalSearches == 0 && incoming().totalInstalls == 0;
+
+      allow update: if isSignedIn() && isValidStatsUpdate();
+    }
+
+    // Notifications (for Automated Notifications feature)
+    match /notifications/{notifId} {
+      allow read: if true;
+      allow write: if isAdmin();
     }
   }
 }

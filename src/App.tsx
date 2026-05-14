@@ -9,12 +9,12 @@
  */
 
 import React, { useState, useEffect, useRef } from 'react';
-import { Search, History, BookOpen, Trash2, ArrowRight, Info, Plus, Edit2, X, Save, Settings, LogIn, LogOut, Upload, Download, FileSpreadsheet, Loader2, Bell, BellOff, Volume2, VolumeX, Globe, WifiOff, Cloud } from 'lucide-react';
+import { Search, History, BookOpen, Trash2, ArrowRight, Plus, Edit2, X, Save, Settings, LogIn, LogOut, Upload, Download, Loader2, Bell, BellOff, Volume2, VolumeX, WifiOff, Cloud } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import * as XLSX from 'xlsx';
 import { initialWords, type WordEntry } from './data/initialWords.ts';
 import { 
-  db, collection, doc, setDoc, getDoc, getDocs, updateDoc, deleteDoc, query, where, limit, onSnapshot, getDocFromServer, increment,
+  db, collection, doc, setDoc, getDoc, getDocs, deleteDoc, query, limit, onSnapshot, increment,
   OperationType, handleFirestoreError 
 } from './lib/firebase.ts';
 
@@ -78,7 +78,9 @@ export default function App() {
     if (savedUpload) {
       try {
         setLastUpload(JSON.parse(savedUpload));
-      } catch (e) {}
+      } catch (e) {
+        console.warn("Error loading last upload:", e);
+      }
     }
 
     // Offline detection
