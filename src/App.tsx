@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect, useRef, Component, ErrorInfo, ReactNode } from 'react';
+import React, { useState, useEffect, useRef, ErrorInfo, ReactNode } from 'react';
 import { Search, History, BookOpen, Trash2, ArrowRight, Plus, Edit2, X, Save, Settings, LogIn, LogOut, Upload, Download, Loader2, Bell, BellOff, Volume2, VolumeX, WifiOff, Cloud } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { initialWords, type WordEntry } from './data/initialWords.ts';
@@ -13,13 +13,19 @@ import {
 } from './lib/firebase.ts';
 
 // Simple Error Boundary
-class ErrorBoundary extends Component<{ children: ReactNode }, { hasError: boolean, error: Error | null }> {
-  constructor(props: { children: ReactNode }) {
-    super(props);
-    this.state = { hasError: false, error: null };
-  }
+interface ErrorBoundaryProps {
+  children: ReactNode;
+}
 
-  static getDerivedStateFromError(error: Error) {
+interface ErrorBoundaryState {
+  hasError: boolean;
+  error: Error | null;
+}
+
+class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoundaryState> {
+  public state: ErrorBoundaryState = { hasError: false, error: null };
+
+  static getDerivedStateFromError(error: Error): ErrorBoundaryState {
     return { hasError: true, error };
   }
 
@@ -28,11 +34,12 @@ class ErrorBoundary extends Component<{ children: ReactNode }, { hasError: boole
   }
 
   render() {
-    if (this.state.hasError) {
+    const { hasError, error } = this.state;
+    if (hasError) {
       return (
         <div style={{ padding: '20px', textAlign: 'center', background: '#fdfbf7', minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column' }}>
           <h1 style={{ fontFamily: 'sans-serif', textTransform: 'uppercase' }}>Sepertinya ada masalah teknis</h1>
-          <p style={{ fontStyle: 'italic', opacity: 0.6 }}>{this.state.error?.message}</p>
+          <p style={{ fontStyle: 'italic', opacity: 0.6 }}>{error?.message}</p>
           <button 
             onClick={() => {
               localStorage.clear();
@@ -45,7 +52,7 @@ class ErrorBoundary extends Component<{ children: ReactNode }, { hasError: boole
         </div>
       );
     }
-    return this.props.children;
+    return (this as any).props.children;
   }
 }
 
@@ -66,9 +73,6 @@ function MainApp() {
   const [history, setHistory] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
-  const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
-  const [showInstallBtn, setShowInstallBtn] = useState(false);
-  const [isMobile, setIsMobile] = useState(false);
   const [showLoginModal, setShowLoginModal] = useState(false);
   const [loginCreds, setLoginCreds] = useState({ email: '', password: '' });
   const [loginError, setLoginError] = useState<string | null>(null);
@@ -102,7 +106,7 @@ function MainApp() {
           setUser(u);
           setIsAdmin(true);
         }
-      } catch (e) {
+      } catch {
         localStorage.removeItem('leksikon_admin_session');
       }
     }
@@ -213,6 +217,11 @@ function MainApp() {
   };
 
   const toggleNotifications = async () => {
+    if (!("Notification" in window)) {
+      alert("Browser atau perangkat Anda tidak mendukung fitur notifikasi secara langsung. Pastikan Anda membuka aplikasi ini di browser Chrome dan bukan di dalam penampil web terbatas.");
+      return;
+    }
+
     if (notificationsEnabled) {
       setNotificationsEnabled(false);
       localStorage.setItem('leksikon_notifications', 'disabled');
@@ -228,10 +237,11 @@ function MainApp() {
             icon: '/logo.png'
           });
         } else {
-          alert('Mohon izinkan notifikasi pada browser untuk fitur ini.');
+          alert('Izin notifikasi ditolak. Mohon aktifkan izin notifikasi di pengaturan browser/aplikasi Anda untuk menggunakan fitur ini.');
         }
       } catch (e) {
         console.error("Error requesting notification permission:", e);
+        alert('Gagal meminta izin notifikasi. Pastikan koneksi internet stabil.');
       }
     }
   };
@@ -448,8 +458,8 @@ function MainApp() {
 
   // Save history
   useEffect(() => {
-    localStorage.setItem('kamus_history', JSON.stringify(history));
-  }, [history]);
+    localStorage.setItem('kamus_history', JSON.stringify([]));
+  }, []);
 
   // Increment global install count
   const incrementInstall = async () => {
@@ -468,36 +478,32 @@ function MainApp() {
     const checkMobile = () => {
       return /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
     };
-    const mob = checkMobile();
-    setIsMobile(mob);
-    
-    // Always show install button on mobile for APK download
-    if (mob) {
-      setShowInstallBtn(true);
-    }
-
-    const handler = (e: any) => {
-      e.preventDefault();
-      setDeferredPrompt(e);
-      setShowInstallBtn(true);
-    };
-    
-    window.addEventListener('beforeinstallprompt', handler);
+    checkMobile();
     
     // Jika PWA sudah terinstal
     window.addEventListener('appinstalled', () => {
-      setShowInstallBtn(false);
-      setDeferredPrompt(null);
       incrementInstall();
     });
 
-    return () => window.removeEventListener('beforeinstallprompt', handler);
+    return () => {};
   }, []);
 
   const handleInstallApp = () => {
-    // Lead user to APK download link as requested
-    window.open('https://kodular.app/PSY-FLG', '_blank');
+    // Lead user to APK download link
+    // Menggunakan format yang lebih stabil untuk Kodular
+    const downloadUrl = 'https://kodular.io/PSY-FLG';
+    
     incrementInstall();
+
+    // Mencoba membuka di jendela baru, jika gagal (ke blokir webview) gunakan redirect langsung
+    try {
+      const win = window.open(downloadUrl, '_blank');
+      if (!win || win.closed || typeof win.closed === 'undefined') {
+        window.location.href = downloadUrl;
+      }
+    } catch {
+      window.location.href = downloadUrl;
+    }
   };
 
   const handleSearch = async (queryStr: string = searchQuery) => {
@@ -615,60 +621,90 @@ function MainApp() {
 
   const handleSpeak = (text: string, subText: string) => {
     if (!window.speechSynthesis) {
-      alert("Fitur suara tidak didukung di perangkat ini.");
+      alert("Fitur suara tidak didukung di perangkat ini. Pastikan volume media aktif dan browser memiliki izin suara.");
       return;
     }
 
-    if (isSpeaking) {
+    try {
+      // Cancel and Resume are crucial for Android/Kodular WebViews to "wake up" the engine
       window.speechSynthesis.cancel();
-      setIsSpeaking(false);
-      return;
-    }
+      window.speechSynthesis.resume();
 
-    // Matikan suara sebelumnya jika ada yang menggantung
-    window.speechSynthesis.cancel();
-
-    // Buat utterance baru
-    const UtteranceClass = window.SpeechSynthesisUtterance || (window as any).webkitSpeechSynthesisUtterance;
-    if (!UtteranceClass) {
-      alert("Fitur suara tidak didukung di perangkat ini.");
-      return;
-    }
-
-    const utterance = new UtteranceClass(`${text}. Definisi: ${subText}`);
-    utterance.lang = 'id-ID';
-    
-    // Pencarian suara Bahasa Indonesia secara asinkron atau langsung
-    const setVoice = () => {
-      if (!window.speechSynthesis) return;
-      const voices = window.speechSynthesis.getVoices();
-      const idVoice = voices.find(v => v.lang === 'id-ID') || 
-                      voices.find(v => v.lang === 'id_ID') || 
-                      voices.find(v => v.lang.startsWith('id')) ||
-                      voices.find(v => v.name.toLowerCase().includes('indonesia'));
-      
-      if (idVoice) {
-        utterance.voice = idVoice;
-      }
-      
-      utterance.rate = 0.85; 
-      utterance.pitch = 1.0;
-      utterance.volume = 1.0;
-
-      utterance.onstart = () => setIsSpeaking(true);
-      utterance.onend = () => setIsSpeaking(false);
-      utterance.onerror = (e) => {
-        console.error("Speech Synthesis Error:", e);
+      if (isSpeaking) {
         setIsSpeaking(false);
-      };
+        return;
+      }
 
-      window.speechSynthesis.speak(utterance);
-    };
+      // Small delay to ensure cancel is processed
+      setTimeout(() => {
+        const UtteranceClass = window.SpeechSynthesisUtterance || (window as any).webkitSpeechSynthesisUtterance;
+        if (!UtteranceClass) {
+          alert("Fungsi SpeechSynthesisUtterance tidak tersedia.");
+          return;
+        }
 
-    if (window.speechSynthesis.getVoices().length === 0) {
-      window.speechSynthesis.onvoiceschanged = setVoice;
-    } else {
-      setVoice();
+        const utterance = new UtteranceClass(`${text}. Definisi: ${subText}`);
+        utterance.lang = 'id-ID';
+        
+        const setVoice = () => {
+          if (!window.speechSynthesis) return;
+          const voices = window.speechSynthesis.getVoices();
+          
+          // Debugging log for webviewer
+          if (voices.length === 0) console.warn("No voices loaded in speech engine.");
+
+          const idVoice = voices.find(v => v.lang === 'id-ID' || v.lang === 'id_ID' || v.lang.startsWith('id')) || 
+                          voices.find(v => v.name.toLowerCase().includes('indonesia'));
+          
+          if (idVoice) {
+            utterance.voice = idVoice;
+          }
+          
+          utterance.rate = 0.9; 
+          utterance.pitch = 1.0;
+          utterance.volume = 1.0;
+
+          utterance.onstart = () => setIsSpeaking(true);
+          utterance.onend = () => setIsSpeaking(false);
+          utterance.onerror = (event: any) => {
+            console.error("Speech Synthesis Error:", event.error);
+            
+            if (event.error === 'language-unavailable') {
+              console.warn("Language id-ID unavailable, trying default...");
+              utterance.lang = ''; 
+              window.speechSynthesis.speak(utterance);
+              return;
+            }
+
+            setIsSpeaking(false);
+            if (event.error && event.error !== 'interrupted' && event.error !== 'canceled') {
+              // Be more descriptive for permissions/missing engine
+              if (event.error === 'network') {
+                alert("Membutuhkan koneksi internet untuk sintesis suara awal.");
+              } else {
+                console.warn(`Gagal mematikan suara: ${event.error}`);
+              }
+            }
+          };
+
+          window.speechSynthesis.speak(utterance);
+        };
+
+        const currentVoices = window.speechSynthesis.getVoices();
+        if (currentVoices.length === 0) {
+          const timeout = setTimeout(() => setVoice(), 1000);
+          window.speechSynthesis.onvoiceschanged = () => {
+            clearTimeout(timeout);
+            setVoice();
+            window.speechSynthesis.onvoiceschanged = null;
+          };
+        } else {
+          setVoice();
+        }
+      }, 150);
+    } catch (err) {
+      console.error("Speech Critical Failure:", err);
+      alert("Terjadi kesalahan pada modul suara.");
     }
   };
 

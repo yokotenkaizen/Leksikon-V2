@@ -9,7 +9,7 @@ import rawConfig from '../../firebase-applet-config.json';
 const firebaseConfig = (function() {
   try {
     return rawConfig;
-  } catch (_e) {
+  } catch {
     console.error("Firebase config file missing or unreadable.");
     return {} as any;
   }
@@ -30,16 +30,16 @@ try {
           tabManager: persistentMultipleTabManager()
         })
       }, (firebaseConfig as any).firestoreDatabaseId);
-    } catch (e) {
-      console.warn("Firestore initialization with cache failed, falling back to basic:", e);
+    } catch {
+      console.warn("Firestore initialization with cache failed, falling back to basic");
       // Fallback to basic initialization
       db = initializeFirestore(app, {});
     }
 
     try {
       auth = getAuth(app);
-    } catch (e) {
-      console.warn("Auth initialization failed:", e);
+    } catch {
+      console.warn("Auth initialization failed");
     }
   } else {
     console.warn("Firebase configuration is missing or incomplete (apiKey/projectId). Database features will not work.");
