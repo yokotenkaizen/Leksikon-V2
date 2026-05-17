@@ -348,7 +348,7 @@ function MainApp() {
   // Excel Export Current Data
   const downloadCurrentData = async () => {
     if (!db) {
-      alert("Basis data tidak tersedia.");
+      showStatus("Basis data tidak tersedia.", 'error');
       return;
     }
     setIsProcessing(true);
@@ -376,7 +376,7 @@ function MainApp() {
       XLSX.writeFile(wb, `Database_Leksikon_${new Date().toISOString().split('T')[0]}.xlsx`);
     } catch (err) {
       console.error("Export error:", err);
-      alert("Gagal mengekspor data.");
+      showStatus("Gagal mengekspor data.", 'error');
     } finally {
       setIsProcessing(false);
     }
@@ -388,14 +388,14 @@ function MainApp() {
     if (!file) return;
 
     if (!user) {
-      alert("Harap login sebagai admin untuk mengunggah file.");
+      showStatus("Harap login sebagai admin untuk mengunggah file.", 'info');
       return;
     }
 
     const reader = new FileReader();
     reader.onload = async (evt) => {
       if (!db) {
-        alert("Basis data tidak tersedia.");
+        showStatus("Basis data tidak tersedia.", 'error');
         return;
       }
       setIsProcessing(true);
@@ -444,7 +444,7 @@ function MainApp() {
         setLastUpload(uploadInfo);
         localStorage.setItem('leksikon_last_upload', JSON.stringify(uploadInfo));
 
-        alert(`Berhasil mengimpor ${successCount} kosakata ke database.`);
+        showStatus(`Berhasil mengimpor ${successCount} kosakata ke database.`, 'success');
         setError(null);
       } catch (err) {
         console.error(err);
@@ -502,16 +502,14 @@ function MainApp() {
   }, []);
 
   const handleInstallApp = () => {
-    // Saran: Gunakan URL link langsung Google Drive untuk download APK
-    // Format: https://drive.google.com/uc?export=download&id=FILE_ID
-    // Ganti 'FILE_ID_ANDA' dengan ID file yang didapat dari link share Google Drive Anda.
-    const driveFileId = '1-uH6K8m9P_zV2_0S0_g9WjN5V9_XW9z'; // Ganti bagian ini
+    // Tautan langsung ke Google Drive untuk download otomatis
+    const driveFileId = '1BXwIvwRnMTT8W7N5Sfxy9xNKWRhi2-kr';
     const downloadUrl = `https://drive.google.com/uc?export=download&id=${driveFileId}`;
     
     showStatus("Menyiapkan unduhan APK Leksikon...", 'success');
     incrementInstall();
 
-    // Mencoba membuka di jendela baru, jika gagal gunakan redirect langsung
+    // Mencoba membuka di jendela baru untuk download, jika gagal gunakan redirect
     try {
       const win = window.open(downloadUrl, '_blank');
       if (!win || win.closed || typeof win.closed === 'undefined') {
@@ -587,19 +585,19 @@ function MainApp() {
   const handleSaveWord = async () => {
     if (!editForm.word || !editForm.definition) return;
     if (!user) {
-      alert("Harap login untuk menyimpan perubahan.");
+      showStatus("Harap login untuk menyimpan perubahan.", 'info');
       return;
     }
 
     if (!db) {
-      alert("Basis data tidak tersedia. Perubahan tidak dapat disimpan.");
+      showStatus("Basis data tidak tersedia. Perubahan tidak dapat disimpan.", 'error');
       return;
     }
     
     const wordId = editForm.word.toLowerCase();
     try {
       if (isOffline) {
-        alert("Anda sedang offline. Perubahan telah disimpan secara lokal dan akan disinkronkan saat internet kembali.");
+        showStatus("Anda sedang offline. Perubahan telah disimpan secara lokal dan akan disinkronkan saat internet kembali.", 'info');
       }
       
       await setDoc(doc(db, 'words', wordId), {
@@ -617,14 +615,14 @@ function MainApp() {
   const handleDeleteWord = async (word: string) => {
     if (!user) return;
     if (!db) {
-      alert("Basis data tidak tersedia.");
+      showStatus("Basis data tidak tersedia.", 'error');
       return;
     }
     if (window.confirm(`Hapus kata "${word}" dari database?`)) {
       const wordId = word.toLowerCase();
       try {
         if (isOffline) {
-          alert("Anda sedang offline. Penghapusan telah dijadwalkan dan akan disinkronkan saat internet kembali.");
+          showStatus("Anda sedang offline. Penghapusan telah dijadwalkan dan akan disinkronkan saat internet kembali.", 'info');
         }
         await deleteDoc(doc(db, 'words', wordId));
         setResult(null);
@@ -944,7 +942,7 @@ function MainApp() {
                   <button 
                     onClick={() => {
                       if (!db) {
-                        alert("Basis data tidak tersedia.");
+                        showStatus("Basis data tidak tersedia.", 'error');
                         return;
                       }
                       if(window.confirm('Impor 150 kata contoh ke database?')) {
