@@ -81,6 +81,16 @@ function MainApp() {
   const [isOffline, setIsOffline] = useState(!navigator.onLine);
   const [lastUpload, setLastUpload] = useState<{timestamp: string, count: number} | null>(null);
   const [stats, setStats] = useState({ totalSearches: 0, totalInstalls: 0 });
+  const [statusMessage, setStatusMessage] = useState<string | null>(null);
+  const [statusType, setStatusType] = useState<'info' | 'error' | 'success'>('info');
+
+  const showStatus = (msg: string, type: 'info' | 'error' | 'success' = 'info', duration = 5000) => {
+    setStatusMessage(msg);
+    setStatusType(type);
+    setTimeout(() => {
+      setStatusMessage(current => current === msg ? null : current);
+    }, duration);
+  };
   
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -218,13 +228,14 @@ function MainApp() {
 
   const toggleNotifications = async () => {
     if (!("Notification" in window)) {
-      alert("Browser atau perangkat Anda tidak mendukung fitur notifikasi secara langsung. Pastikan Anda membuka aplikasi ini di browser Chrome dan bukan di dalam penampil web terbatas.");
+      showStatus("Perangkat Anda tidak mendukung notifikasi. Gunakan Chrome untuk pengalaman terbaik.", 'info');
       return;
     }
 
     if (notificationsEnabled) {
       setNotificationsEnabled(false);
       localStorage.setItem('leksikon_notifications', 'disabled');
+      showStatus("Notifikasi harian dimatikan.", 'info');
     } else {
       try {
         const permission = await Notification.requestPermission();
@@ -232,16 +243,18 @@ function MainApp() {
           setNotificationsEnabled(true);
           localStorage.setItem('leksikon_notifications', 'enabled');
           
+          showStatus("Notifikasi Aktif! Anda akan menerima kata baru pukul 08:00 WIB.", 'success');
+          
           await sendNotification('Leksikon Digital', {
-            body: 'Notifikasi harian Leksikon telah diaktifkan! Anda akan menerima kata baru setiap hari pukul 08.00 WIB.',
+            body: 'Notifikasi harian Leksikon telah diaktifkan!',
             icon: '/logo.png'
           });
         } else {
-          alert('Izin notifikasi ditolak. Mohon aktifkan izin notifikasi di pengaturan browser/aplikasi Anda untuk menggunakan fitur ini.');
+          showStatus("Izin ditolak. Harap izinkan notifikasi di pengaturan browser Anda.", 'error');
         }
       } catch (e) {
         console.error("Error requesting notification permission:", e);
-        alert('Gagal meminta izin notifikasi. Pastikan koneksi internet stabil.');
+        showStatus("Gagal meminta izin. Cek koneksi Anda.", 'error');
       }
     }
   };
@@ -489,13 +502,16 @@ function MainApp() {
   }, []);
 
   const handleInstallApp = () => {
-    // Lead user to APK download link
-    // Menggunakan format yang lebih stabil untuk Kodular
-    const downloadUrl = 'https://kodular.io/PSY-FLG';
+    // Saran: Gunakan URL link langsung Google Drive untuk download APK
+    // Format: https://drive.google.com/uc?export=download&id=FILE_ID
+    // Ganti 'FILE_ID_ANDA' dengan ID file yang didapat dari link share Google Drive Anda.
+    const driveFileId = '1-uH6K8m9P_zV2_0S0_g9WjN5V9_XW9z'; // Ganti bagian ini
+    const downloadUrl = `https://drive.google.com/uc?export=download&id=${driveFileId}`;
     
+    showStatus("Menyiapkan unduhan APK Leksikon...", 'success');
     incrementInstall();
 
-    // Mencoba membuka di jendela baru, jika gagal (ke blokir webview) gunakan redirect langsung
+    // Mencoba membuka di jendela baru, jika gagal gunakan redirect langsung
     try {
       const win = window.open(downloadUrl, '_blank');
       if (!win || win.closed || typeof win.closed === 'undefined') {
@@ -621,12 +637,11 @@ function MainApp() {
 
   const handleSpeak = (text: string, subText: string) => {
     if (!window.speechSynthesis) {
-      alert("Fitur suara tidak didukung di perangkat ini. Pastikan volume media aktif dan browser memiliki izin suara.");
+      showStatus("Modul suara tidak tersedia/aktif di perangkat ini.", 'error');
       return;
     }
 
     try {
-      // Cancel and Resume are crucial for Android/Kodular WebViews to "wake up" the engine
       window.speechSynthesis.cancel();
       window.speechSynthesis.resume();
 
@@ -635,13 +650,9 @@ function MainApp() {
         return;
       }
 
-      // Small delay to ensure cancel is processed
       setTimeout(() => {
         const UtteranceClass = window.SpeechSynthesisUtterance || (window as any).webkitSpeechSynthesisUtterance;
-        if (!UtteranceClass) {
-          alert("Fungsi SpeechSynthesisUtterance tidak tersedia.");
-          return;
-        }
+        if (!UtteranceClass) return;
 
         const utterance = new UtteranceClass(`${text}. Definisi: ${subText}`);
         utterance.lang = 'id-ID';
@@ -650,9 +661,6 @@ function MainApp() {
           if (!window.speechSynthesis) return;
           const voices = window.speechSynthesis.getVoices();
           
-          // Debugging log for webviewer
-          if (voices.length === 0) console.warn("No voices loaded in speech engine.");
-
           const idVoice = voices.find(v => v.lang === 'id-ID' || v.lang === 'id_ID' || v.lang.startsWith('id')) || 
                           voices.find(v => v.name.toLowerCase().includes('indonesia'));
           
@@ -667,23 +675,12 @@ function MainApp() {
           utterance.onstart = () => setIsSpeaking(true);
           utterance.onend = () => setIsSpeaking(false);
           utterance.onerror = (event: any) => {
-            console.error("Speech Synthesis Error:", event.error);
-            
+            setIsSpeaking(false);
             if (event.error === 'language-unavailable') {
-              console.warn("Language id-ID unavailable, trying default...");
               utterance.lang = ''; 
               window.speechSynthesis.speak(utterance);
-              return;
-            }
-
-            setIsSpeaking(false);
-            if (event.error && event.error !== 'interrupted' && event.error !== 'canceled') {
-              // Be more descriptive for permissions/missing engine
-              if (event.error === 'network') {
-                alert("Membutuhkan koneksi internet untuk sintesis suara awal.");
-              } else {
-                console.warn(`Gagal mematikan suara: ${event.error}`);
-              }
+            } else if (event.error === 'network') {
+              showStatus("Koneksi internet diperlukan untuk memuat suara.", 'info');
             }
           };
 
@@ -703,8 +700,7 @@ function MainApp() {
         }
       }, 150);
     } catch (err) {
-      console.error("Speech Critical Failure:", err);
-      alert("Terjadi kesalahan pada modul suara.");
+      console.error("Speech Failure:", err);
     }
   };
 
@@ -1350,6 +1346,22 @@ function MainApp() {
             </div>
           </div>
         )}
+
+      {/* Status Toast Notification Dashboard */}
+      {statusMessage && (
+        <div className="fixed bottom-24 left-1/2 -translate-x-1/2 z-[100] w-[90%] max-w-sm animate-in fade-in slide-in-from-bottom-4 duration-300">
+          <div className={`shadow-2xl border px-6 py-4 rounded-xl flex items-center gap-4 ${
+            statusType === 'error' ? 'bg-red-50 border-red-200 text-red-700' :
+            statusType === 'success' ? 'bg-amber-50 border-amber-200 text-amber-700' :
+            'bg-[#1a1a1a] text-white border-white/10'
+          }`}>
+            <div className={`w-2 h-2 rounded-full shrink-0 ${
+              statusType === 'success' ? 'bg-amber-500' : statusType === 'error' ? 'bg-red-500' : 'bg-blue-400'
+            }`} />
+            <p className="text-xs font-bold font-sans uppercase tracking-widest">{statusMessage}</p>
+          </div>
+        </div>
+      )}
 
       {/* Decorative BG element */}
       <div className="fixed top-0 right-0 p-8 pointer-events-none opacity-[0.03] overflow-hidden select-none">
