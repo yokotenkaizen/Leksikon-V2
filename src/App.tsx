@@ -502,6 +502,16 @@ function MainApp() {
   }, []);
 
   const handleInstallApp = () => {
+    // Cek apakah sudah dalam mode PWA/Standalone
+    const isPWA = window.matchMedia('(display-mode: standalone)').matches || 
+                  (window.navigator as any).standalone || 
+                  navigator.userAgent.includes('wv');
+
+    if (isPWA) {
+      showStatus("Aplikasi sudah terinstal. Download hanya tersedia di browser. Terima kasih!", 'info', 6000);
+      return;
+    }
+
     // Tautan langsung ke Google Drive untuk download otomatis
     const driveFileId = '1BXwIvwRnMTT8W7N5Sfxy9xNKWRhi2-kr';
     const downloadUrl = `https://drive.google.com/uc?export=download&id=${driveFileId}`;
