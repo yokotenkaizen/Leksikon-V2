@@ -18,11 +18,12 @@ service cloud.firestore {
     }
 
     function isAdmin() {
+      // In the app, admin login can be local or via Google. We check if the email is yokotenkaizen@gmail.com
       return isVerified() && request.auth.token.email == 'yokotenkaizen@gmail.com';
     }
 
     function isValidId(id) {
-      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+      return id is string && id.size() <= 128;
     }
 
     function incoming() {
@@ -37,51 +38,108 @@ service cloud.firestore {
 
     function isValidWord(data) {
       return data.keys().hasAll(['word', 'category', 'definition', 'examples', 'updatedAt'])
-        && data.keys().size() <= 6 // Allow optional etymology
+        && data.keys().size() <= 7 // Allow searchCount & etymology
         && data.word is string && data.word.size() > 0 && data.word.size() <= 100
         && data.category is string && data.category.size() > 0 && data.category.size() <= 50
         && data.definition is string && data.definition.size() > 0 && data.definition.size() <= 2000
         && data.examples is list && data.examples.size() <= 10
         && (data.get('etymology', '') is string && data.get('etymology', '').size() <= 1000)
-        && data.updatedAt is string; // Date-time format
+        && data.updatedAt is string;
     }
 
     function isValidStatsUpdate() {
-      // Only allow numeric increments for totalSearches and totalInstalls
       let affected = incoming().diff(existing()).affectedKeys();
       return affected.hasOnly(['totalSearches', 'totalInstalls'])
         && (!incoming().diff(existing()).changedKeys().contains('totalSearches') || incoming().totalSearches > existing().totalSearches)
         && (!incoming().diff(existing()).changedKeys().contains('totalInstalls') || incoming().totalInstalls > existing().totalInstalls);
     }
 
-    // --- PHASE 5: Collections ---
+    function isValidEvaluation(data) {
+      return data.keys().hasAll(['email', 'totalWords', 'typosCount', 'precision', 'inputText', 'timestamp'])
+        && data.keys().size() == 6
+        && data.email is string && data.email.size() <= 128
+        && data.totalWords is int
+        && data.typosCount is int
+        && data.precision is string && data.precision.size() <= 20
+        && data.inputText is string && data.inputText.size() <= 100000
+        && data.timestamp is string;
+    }
+
+    function isValidTypoUser(data) {
+      return data.keys().hasAll(['email', 'usageCount', 'paymentStatus'])
+        && data.keys().size() <= 5
+        && data.email is string && data.email.size() <= 128
+        && data.usageCount is int
+        && data.paymentStatus is string && data.paymentStatus.size() <= 20;
+    }
+
+    function isValidPayment(data) {
+      return data.keys().hasAll(['email', 'amount', 'status', 'requestedAt'])
+        && data.keys().size() <= 5
+        && data.email is string && data.email.size() <= 128
+        && data.amount is int
+        && data.status is string && data.status.size() <= 20
+        && data.requestedAt is string;
+    }
+
+    function isValidSettings(data) {
+      return data.keys().hasAll(['gopayNumber'])
+        && data.keys().size() <= 2
+        && data.gopayNumber is string && data.gopayNumber.size() <= 50;
+    }
+
+    // --- PHASE 4: Match collections ---
 
     // Words collection
     match /words/{wordId} {
       allow read: if true;
-      
-      allow create: if isAdmin() && isValidId(wordId) && isValidWord(incoming());
-      
-      allow update: if isAdmin() && isValidWord(incoming());
-      
-      allow delete: if isAdmin();
+      allow create: if isValidId(wordId) && isValidWord(incoming());
+      allow update: if isValidWord(incoming())
+        || (
+          incoming().diff(existing()).affectedKeys().hasOnly(['searchCount'])
+          && incoming().searchCount == (existing().get('searchCount', 0) + 1)
+        );
+      allow delete: if true;
     }
 
     // Stats collection
     match /stats/{statId} {
       allow read: if true;
-      
-      allow create: if isSignedIn() && isValidId(statId) 
+      allow create: if isValidId(statId) 
         && incoming().keys().hasAll(['totalSearches', 'totalInstalls'])
         && incoming().totalSearches == 0 && incoming().totalInstalls == 0;
-
-      allow update: if isSignedIn() && isValidStatsUpdate();
+      allow update: if isValidStatsUpdate();
     }
 
-    // Notifications (for Automated Notifications feature)
+    // Notifications
     match /notifications/{notifId} {
       allow read: if true;
-      allow write: if isAdmin();
+      allow write: if true;
+    }
+
+    // Evaluations
+    match /evaluations/{evalId} {
+      allow create: if isValidId(evalId) && isValidEvaluation(incoming());
+      allow read, update, delete: if true;
+    }
+
+    // Users (typo usage tracking)
+    match /users/{emailId} {
+      allow read: if true; // anyone can look up usage statistics of an email to preserve local states
+      allow create, update: if isValidId(emailId) && isValidTypoUser(incoming());
+      allow delete: if true;
+    }
+
+    // Payments logs
+    match /payments/{paymentId} {
+      allow create: if isValidId(paymentId) && isValidPayment(incoming());
+      allow read, update, delete: if true;
+    }
+
+    // Settings
+    match /settings/{settingId} {
+      allow read: if true;
+      allow write: if true;
     }
   }
 }

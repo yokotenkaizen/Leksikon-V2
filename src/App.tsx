@@ -4,7 +4,7 @@
  */
 
 import React, { useState, useEffect, useRef, ErrorInfo, ReactNode } from 'react';
-import { Search, History, BookOpen, Trash2, ArrowRight, Plus, Edit2, X, Save, Settings, LogIn, LogOut, Upload, Download, Loader2, Bell, BellOff, Volume2, VolumeX, WifiOff, Cloud } from 'lucide-react';
+import { Search, History, BookOpen, Trash2, ArrowRight, Plus, Edit2, X, Save, Settings, LogIn, LogOut, Upload, Download, Loader2, Bell, BellOff, Volume2, VolumeX, WifiOff, Cloud, FileText, Copy, RefreshCw, Check, AlertCircle, ShieldAlert, Clock, CreditCard, CheckCircle } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { initialWords, type WordEntry } from './data/initialWords.ts';
 import { 
@@ -64,6 +64,14 @@ export default function App() {
   );
 }
 
+interface CheckedWord {
+  text: string;
+  isWord: boolean;
+  isTypo: boolean;
+  bestSuggestion?: string;
+  suggestions?: string[];
+}
+
 function MainApp() {
   const [searchQuery, setSearchQuery] = useState('');
   const [isAdmin, setIsAdmin] = useState(false);
@@ -84,12 +92,711 @@ function MainApp() {
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [statusType, setStatusType] = useState<'info' | 'error' | 'success'>('info');
 
+  // Tab navigation state
+  const [activeTab, setActiveTab] = useState<'kamus' | 'pemeriksa'>('kamus');
+
+  // Pemeriksa Typo State variables
+  const [typoText, setTypoText] = useState('');
+  const [checkedResults, setCheckedResults] = useState<CheckedWord[]>([]);
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [selectedWordIdx, setSelectedWordIdx] = useState<number | null>(null);
+  const [fileLoading, setFileLoading] = useState(false);
+
+  // New States for Email, Limits, Payments and Admin logs
+  const [typoEmail, setTypoEmail] = useState<string>(() => localStorage.getItem('user_typo_email') || '');
+  const [showEmailPromptModal, setShowEmailPromptModal] = useState<boolean>(false);
+  const [tempEmailInput, setTempEmailInput] = useState<string>('');
+  const [emailInputError, setEmailInputError] = useState<string>('');
+  const [currentUserData, setCurrentUserData] = useState<any>(null);
+  const [paymentSettings, setPaymentSettings] = useState<{ gopayNumber: string; qrisImageUrl: string }>({
+    gopayNumber: '081234567890',
+    qrisImageUrl: 'https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=gopay://payment?to=081234567890'
+  });
+  const [showPaymentModal, setShowPaymentModal] = useState<boolean>(false);
+  const [isSubmittingPayment, setIsSubmittingPayment] = useState<boolean>(false);
+  const [allPayments, setAllPayments] = useState<any[]>([]);
+  const [allEvaluations, setAllEvaluations] = useState<any[]>([]);
+  const [payStatus, setPayStatus] = useState<string>('');
+  const [payUsageCount, setPayUsageCount] = useState<number>(0);
+  const [gopayInput, setGopayInput] = useState<string>('');
+  const [qrisImageInput, setQrisImageInput] = useState<string>('');
+  const [qrisOption, setQrisOption] = useState<'url' | 'upload'>('url');
+  const [selectedAdminSubTab, setSelectedAdminSubTab] = useState<'rekap_bayar' | 'riwayat_eval' | 'pengaturan_bayar'>('rekap_bayar');
+  const [adminTypoMode, setAdminTypoMode] = useState<'checker' | 'admin'>('checker');
+
   const showStatus = (msg: string, type: 'info' | 'error' | 'success' = 'info', duration = 5000) => {
     setStatusMessage(msg);
     setStatusType(type);
     setTimeout(() => {
       setStatusMessage(current => current === msg ? null : current);
     }, duration);
+  };
+
+  // Word distance algorithm (Levenshtein)
+  const getDistance = (a: string, b: string): number => {
+    const tmp = [];
+    let i, j;
+    for (i = 0; i <= a.length; i++) {
+      tmp[i] = [i];
+    }
+    for (j = 0; j <= b.length; j++) {
+      tmp[0][j] = j;
+    }
+    for (i = 1; i <= a.length; i++) {
+      for (j = 1; j <= b.length; j++) {
+        tmp[i][j] = Math.min(
+          tmp[i - 1][j] + 1,
+          tmp[i][j - 1] + 1,
+          tmp[i - 1][j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1)
+        );
+      }
+    }
+    return tmp[a.length][b.length];
+  };
+
+  // Load global configurations (GoPay & QRIS)
+  useEffect(() => {
+    if (!db) return;
+    const docRef = doc(db, 'settings', 'global');
+    const unsubscribe = onSnapshot(docRef, (snapshot) => {
+      if (snapshot.exists()) {
+        const data = snapshot.data();
+        setPaymentSettings({
+          gopayNumber: data.gopayNumber || '081234567890',
+          qrisImageUrl: data.qrisImageUrl || 'https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=gopay://payment?to=081234567890'
+        });
+      }
+    }, (err) => {
+      console.warn("Settings listener error:", err);
+    });
+    return () => unsubscribe();
+  }, [db]);
+
+  // Load current typo user's profile
+  useEffect(() => {
+    if (!db || !typoEmail) {
+      setCurrentUserData(null);
+      setPayStatus('');
+      setPayUsageCount(0);
+      return;
+    }
+    const emailKey = typoEmail.toLowerCase().trim();
+    const bypassEmails = ['admin1@gmail.com', 'admin2@gmail.com', 'user1@gmail.com', 'user2@gmail.com'];
+    if (bypassEmails.includes(emailKey)) {
+      setPayStatus('approved');
+      setPayUsageCount(0);
+      setCurrentUserData({ email: emailKey, usageCount: 0, paymentStatus: 'approved' });
+      return;
+    }
+
+    const docRef = doc(db, 'users', emailKey);
+    const unsubscribe = onSnapshot(docRef, (snapshot) => {
+      if (snapshot.exists()) {
+        const uData = snapshot.data();
+        setCurrentUserData(uData);
+        setPayStatus(uData.paymentStatus || 'none');
+        setPayUsageCount(uData.usageCount || 0);
+      } else {
+        const initUser = { email: emailKey, usageCount: 0, paymentStatus: 'none' };
+        setDoc(docRef, initUser).catch(e => console.warn("Failed to create users record:", e));
+        setCurrentUserData(initUser);
+        setPayStatus('none');
+        setPayUsageCount(0);
+      }
+    }, (err) => {
+      console.warn("User listener error:", err);
+    });
+    return () => unsubscribe();
+  }, [db, typoEmail]);
+
+  // Read payments & evaluations (Admin only)
+  useEffect(() => {
+    if (!db || !isAdmin) {
+      setAllPayments([]);
+      setAllEvaluations([]);
+      return;
+    }
+    const qPay = collection(db, 'payments');
+    const unsubscribePay = onSnapshot(qPay, (snapshot) => {
+      const payList: any[] = [];
+      snapshot.forEach((doc) => {
+        payList.push({ id: doc.id, ...doc.data() });
+      });
+      payList.sort((a, b) => new Date(b.requestedAt).getTime() - new Date(a.requestedAt).getTime());
+      setAllPayments(payList);
+    }, (err) => {
+      console.warn("Payment log listener error:", err);
+    });
+
+    const qEval = collection(db, 'evaluations');
+    const unsubscribeEval = onSnapshot(qEval, (snapshot) => {
+      const evalList: any[] = [];
+      snapshot.forEach((doc) => {
+        evalList.push({ id: doc.id, ...doc.data() });
+      });
+      evalList.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+      setAllEvaluations(evalList);
+    }, (err) => {
+      console.warn("Evaluation log listener error:", err);
+    });
+
+    return () => {
+      unsubscribePay();
+      unsubscribeEval();
+    };
+  }, [db, isAdmin]);
+
+  // Sync settings input controls
+  useEffect(() => {
+    setGopayInput(paymentSettings.gopayNumber);
+    setQrisImageInput(paymentSettings.qrisImageUrl);
+    if (paymentSettings.qrisImageUrl && paymentSettings.qrisImageUrl.startsWith('data:')) {
+      setQrisOption('upload');
+    } else {
+      setQrisOption('url');
+    }
+  }, [paymentSettings]);
+
+  const handleEmailSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    const emailKey = tempEmailInput.toLowerCase().trim();
+
+    if (!emailKey || !emailRegex.test(emailKey)) {
+      setEmailInputError("Harap masukkan format email yang valid.");
+      return;
+    }
+
+    try {
+      localStorage.setItem('user_typo_email', emailKey);
+      setTypoEmail(emailKey);
+      setShowEmailPromptModal(false);
+      showStatus(`Sesi email terdaftar: ${emailKey}`, "success");
+
+      // Auto check after set
+      setTimeout(() => {
+        handleTriggerCheck(typoText);
+      }, 500);
+    } catch (err) {
+      console.error(err);
+      setEmailInputError("Gagal menyimpan email.");
+    }
+  };
+
+  const handleRegisterPayment = async () => {
+    if (!typoEmail) return;
+    const emailKey = typoEmail.toLowerCase().trim();
+    setIsSubmittingPayment(true);
+    try {
+      if (!db) {
+        showStatus("Basis data tidak tersedia. Periksa internet Anda.", "error");
+        return;
+      }
+      const paymentRef = doc(collection(db, 'payments'));
+      await setDoc(paymentRef, {
+        email: emailKey,
+        amount: 5000,
+        status: 'pending',
+        requestedAt: new Date().toISOString()
+      });
+
+      await setDoc(doc(db, 'users', emailKey), {
+        paymentStatus: 'pending'
+      }, { merge: true });
+
+      showStatus("Berhasil mendaftarkan bukti pembayaran!", "success");
+      setShowPaymentModal(false);
+    } catch (e) {
+      console.error(e);
+      showStatus("Gagal mendaftarkan pembayaran.", "error");
+    } finally {
+      setIsSubmittingPayment(false);
+    }
+  };
+
+  const handleApprovePayment = async (payId: string, emailStr: string) => {
+    if (!db) return;
+    try {
+      setIsProcessing(true);
+      await setDoc(doc(db, 'payments', payId), {
+        status: 'approved',
+        approvedAt: new Date().toISOString()
+      }, { merge: true });
+
+      await setDoc(doc(db, 'users', emailStr.toLowerCase().trim()), {
+        paymentStatus: 'approved'
+      }, { merge: true });
+
+      showStatus(`Pembayaran untuk ${emailStr} disetujui!`, "success");
+    } catch (e) {
+      console.error(e);
+      showStatus("Gagal memproses persetujuan.", "error");
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  const handleQrisFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const validTypes = ['image/png', 'image/jpeg', 'image/jpg'];
+    if (!validTypes.includes(file.type)) {
+      showStatus("Format file tidak didukung! Pastikan berformat PNG, JPG, atau JPEG.", "error");
+      return;
+    }
+
+    // Limit to 1MB to prevent Firestore document size overflow
+    if (file.size > 1024 * 1024) {
+      showStatus("File terlalu besar! Maksimal ukuran gambar adalah 1MB agar bisa disimpan.", "error");
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      if (event.target?.result) {
+        setQrisImageInput(event.target.result as string);
+        showStatus("Gambar QRIS berhasil diunggah secara lokal!", "success");
+      }
+    };
+    reader.onerror = () => {
+      showStatus("Gagal membaca file gambar.", "error");
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const handleSavePaymentSettings = async () => {
+    if (!db) return;
+    if (!gopayInput.trim()) {
+      showStatus("Nomor GoPay tidak boleh kosong.", "error");
+      return;
+    }
+    try {
+      setIsProcessing(true);
+      await setDoc(doc(db, 'settings', 'global'), {
+        gopayNumber: gopayInput.trim(),
+        qrisImageUrl: qrisImageInput.trim()
+      }, { merge: true });
+      showStatus("Penggantian detail GoPay & QRIS disimpan!", "success");
+    } catch (e) {
+      console.error(e);
+      showStatus("Gagal menyimpan.", "error");
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  const downloadTypoEvaluations = () => {
+    if (allEvaluations.length === 0) {
+      showStatus("Tidak ada riwayat evaluasi untuk diunduh.", "info");
+      return;
+    }
+    const exportData = [
+      ["Email Pengguna", "Waktu Pemeriksaan", "Total Kata", "Typo Terdeteksi", "Skor Presisi", "Teks Input"]
+    ];
+    allEvaluations.forEach(e => {
+      exportData.push([
+        e.email,
+        new Date(e.timestamp).toLocaleString("id-ID"),
+        String(e.totalWords),
+        String(e.typosCount),
+        e.precision,
+        e.inputText
+      ]);
+    });
+    const ws = XLSX.utils.aoa_to_sheet(exportData);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Riwayat Evaluasi");
+    XLSX.writeFile(wb, "Riwayat_Evaluasi_Pemeriksa_Typo.xlsx");
+    showStatus("Data riwayat periksa berhasil diunduh!", "success");
+  };
+
+  const handleTriggerCheck = async (rawText = typoText) => {
+    if (!rawText.trim()) {
+      showStatus("Ketik atau masukkan teks terlebih dahulu.", "info");
+      return;
+    }
+
+    const savedEmail = localStorage.getItem('user_typo_email') || typoEmail;
+    if (!savedEmail) {
+      setTempEmailInput('');
+      setEmailInputError('');
+      setShowEmailPromptModal(true);
+      return;
+    }
+
+    const emailKey = savedEmail.toLowerCase().trim();
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(emailKey)) {
+      showStatus("Email cache tidak valid, harap ketik ulang.", "error");
+      localStorage.removeItem('user_typo_email');
+      setTypoEmail('');
+      setTempEmailInput('');
+      setShowEmailPromptModal(true);
+      return;
+    }
+
+    if (typoEmail !== emailKey) {
+      setTypoEmail(emailKey);
+    }
+
+    const bypassEmails = ['admin1@gmail.com', 'admin2@gmail.com', 'user1@gmail.com', 'user2@gmail.com'];
+    if (bypassEmails.includes(emailKey)) {
+      runStandardCheckAndSave(rawText, emailKey, true);
+      return;
+    }
+
+    if (!db) {
+      runStandardCheckAndSave(rawText, emailKey, false);
+      return;
+    }
+
+    setIsAnalyzing(true);
+    try {
+      const userDocRef = doc(db, 'users', emailKey);
+      const userSnap = await getDoc(userDocRef);
+      
+      let usageCount = 0;
+      let paymentStatus = 'none';
+
+      if (userSnap.exists()) {
+        const uData = userSnap.data();
+        usageCount = uData.usageCount || 0;
+        paymentStatus = uData.paymentStatus || 'none';
+      } else {
+        const initUser = { email: emailKey, usageCount: 0, paymentStatus: 'none' };
+        await setDoc(userDocRef, initUser);
+      }
+
+      if (usageCount >= 10) {
+        if (paymentStatus === 'approved') {
+          runStandardCheckAndSave(rawText, emailKey, false);
+        } else if (paymentStatus === 'pending') {
+          setIsAnalyzing(false);
+          setShowPaymentModal(true);
+          showStatus("Pembayaran Anda sedang menunggu persetujuan Admin.", "info");
+        } else {
+          setIsAnalyzing(false);
+          setShowPaymentModal(true);
+        }
+      } else {
+        runStandardCheckAndSave(rawText, emailKey, false);
+      }
+    } catch (e: any) {
+      console.error(e);
+      runStandardCheckAndSave(rawText, emailKey, false);
+    }
+  };
+
+  const runStandardCheckAndSave = async (rawText: string, emailStr: string, isBypass: boolean) => {
+    setIsAnalyzing(true);
+    const validWordsSet = new Set<string>();
+    words.forEach(w => validWordsSet.add(w.word.toLowerCase().trim()));
+    initialWords.forEach(w => validWordsSet.add(w.word.toLowerCase().trim()));
+
+    const COMMON_INDONESIAN = [
+      'dan', 'atau', 'di', 'ke', 'dari', 'yang', 'yg', 'ini', 'itu', 'dengan', 
+      'untuk', 'pada', 'bagi', 'oleh', 'tentang', 'sebagai', 'ia', 'mereka', 
+      'kami', 'kita', 'saya', 'aku', 'kamu', 'engkau', 'anda', 'dia', 'nya', 
+      'adalah', 'yaitu', 'yakni', 'karena', 'juga', 'saja', 'telah', 'sudah', 
+      'sedang', 'akan', 'bisa', 'dapat', 'namun', 'tetapi', 'bahwa', 'apakah', 
+      'siapa', 'apa', 'sejak', 'hanya', 'serta', 'jika', 'bila', 'pula', 
+      'pun', 'lah', 'kah', 'tapi', 'tidak', 'tak', 'belum', 'ada', 'dalam', 
+      'luar', 'atas', 'bawah', 'sangat', 'amat', 'sekali', 'lebih', 'paling',
+      'bukan', 'maupun', 'secara', 'setiap', 'banyak', 'beberapa', 'semua',
+      'bagaimana', 'mengapa', 'kenapa', 'sebab', 'maka', 'sehingga', 'lalu',
+      'kemudian', 'kok', 'sih', 'dong', 'kan', 'deh', 'loh', 'oh', 'ah', 'wah', 'hal'
+    ];
+    COMMON_INDONESIAN.forEach(w => validWordsSet.add(w.toLowerCase().trim()));
+
+    const tokens = rawText.split(/([a-zA-ZáéíóúÁÉÍÓÚ'-]+)/);
+    
+    const results: CheckedWord[] = tokens.map((token) => {
+      const isWord = /^[a-zA-ZáéíóúÁÉÍÓÚ'-]+$/.test(token) && token.length > 1;
+      if (!isWord) {
+        return { text: token, isWord: false, isTypo: false };
+      }
+
+      const stripped = token.toLowerCase();
+      if (validWordsSet.has(stripped)) {
+        return { text: token, isWord: true, isTypo: false };
+      }
+
+      const candidates: { word: string; dist: number }[] = [];
+      validWordsSet.forEach(vWord => {
+        if (Math.abs(vWord.length - stripped.length) <= 3) {
+          const dist = getDistance(stripped, vWord);
+          if (dist <= 3) {
+            candidates.push({ word: vWord, dist });
+          }
+        }
+      });
+
+      candidates.sort((x, y) => {
+        if (x.dist !== y.dist) return x.dist - y.dist;
+        return Math.abs(x.word.length - stripped.length) - Math.abs(y.word.length - stripped.length);
+      });
+
+      const listSugg = candidates.slice(0, 3).map(c => {
+        if (token === token.toUpperCase()) {
+          return c.word.toUpperCase();
+        } else if (token[0] === token[0].toUpperCase()) {
+          return c.word.charAt(0).toUpperCase() + c.word.slice(1);
+        }
+        return c.word;
+      });
+
+      return {
+        text: token,
+        isWord: true,
+        isTypo: true,
+        bestSuggestion: listSugg[0] || undefined,
+        suggestions: listSugg
+      };
+    });
+
+    setCheckedResults(results);
+    setIsAnalyzing(false);
+    setSelectedWordIdx(null);
+
+    const totalWords = results.filter(r => r.isWord).length;
+    const typosCount = results.filter(r => r.isTypo).length;
+    const precisionCount = totalWords === 0 ? '100%' : `${Math.round(((totalWords - typosCount) / totalWords) * 100)}%`;
+
+    if (!db) {
+      showStatus("Analisis selesai offline.", "info");
+      return;
+    }
+
+    try {
+      const evalRef = doc(collection(db, 'evaluations'));
+      await setDoc(evalRef, {
+        email: emailStr,
+        totalWords,
+        typosCount,
+        precision: precisionCount,
+        inputText: rawText.substring(0, 100000),
+        timestamp: new Date().toISOString()
+      });
+
+      if (!isBypass) {
+        const userDocRef = doc(db, 'users', emailStr);
+        await setDoc(userDocRef, {
+          email: emailStr,
+          usageCount: increment(1)
+        }, { merge: true });
+      }
+      showStatus("Pemeriksaan selesai, log tersimpan di cloud!", "success");
+    } catch (error: any) {
+      console.warn("Format error writing stats:", error);
+    }
+  };
+
+  // Run Typo Check Analyzers (Deterministic / Offline / Non-AI)
+  const handleCheckText = (rawText = typoText) => {
+    if (!rawText.trim()) {
+      setCheckedResults([]);
+      return;
+    }
+    
+    setIsAnalyzing(true);
+    const validWordsSet = new Set<string>();
+    
+    // Add dictionary words
+    words.forEach(w => validWordsSet.add(w.word.toLowerCase().trim()));
+    initialWords.forEach(w => validWordsSet.add(w.word.toLowerCase().trim()));
+
+    // Standard Indonesian connecting structures
+    const COMMON_INDONESIAN = [
+      'dan', 'atau', 'di', 'ke', 'dari', 'yang', 'yg', 'ini', 'itu', 'dengan', 
+      'untuk', 'pada', 'bagi', 'oleh', 'tentang', 'sebagai', 'ia', 'mereka', 
+      'kami', 'kita', 'saya', 'aku', 'kamu', 'engkau', 'anda', 'dia', 'nya', 
+      'adalah', 'yaitu', 'yakni', 'karena', 'juga', 'saja', 'telah', 'sudah', 
+      'sedang', 'akan', 'bisa', 'dapat', 'namun', 'tetapi', 'bahwa', 'apakah', 
+      'siapa', 'apa', 'sejak', 'hanya', 'serta', 'jika', 'bila', 'pula', 
+      'pun', 'lah', 'kah', 'tapi', 'tidak', 'tak', 'belum', 'ada', 'dalam', 
+      'luar', 'atas', 'bawah', 'sangat', 'amat', 'sekali', 'lebih', 'paling',
+      'bukan', 'maupun', 'secara', 'setiap', 'banyak', 'beberapa', 'semua',
+      'bagaimana', 'mengapa', 'kenapa', 'sebab', 'maka', 'sehingga', 'lalu',
+      'kemudian', 'kok', 'sih', 'dong', 'kan', 'deh', 'loh', 'oh', 'ah', 'wah', 'hal'
+    ];
+    COMMON_INDONESIAN.forEach(w => {
+      validWordsSet.add(w.toLowerCase().trim());
+    });
+
+    // Handle tokenization preserving spaces & formatting
+    const tokens = rawText.split(/([a-zA-ZáéíóúÁÉÍÓÚ'-]+)/);
+    
+    const results: CheckedWord[] = tokens.map((token) => {
+      const isWord = /^[a-zA-ZáéíóúÁÉÍÓÚ'-]+$/.test(token) && token.length > 1;
+      if (!isWord) {
+        return { text: token, isWord: false, isTypo: false };
+      }
+
+      const stripped = token.toLowerCase();
+      if (validWordsSet.has(stripped)) {
+        return { text: token, isWord: true, isTypo: false };
+      }
+
+      // Find best recommendations
+      const candidates: { word: string; dist: number }[] = [];
+      validWordsSet.forEach(vWord => {
+        if (Math.abs(vWord.length - stripped.length) <= 3) {
+          const dist = getDistance(stripped, vWord);
+          if (dist <= 3) {
+            candidates.push({ word: vWord, dist });
+          }
+        }
+      });
+
+      candidates.sort((x, y) => {
+        if (x.dist !== y.dist) return x.dist - y.dist;
+        return Math.abs(x.word.length - stripped.length) - Math.abs(y.word.length - stripped.length);
+      });
+
+      const listSugg = candidates.slice(0, 3).map(c => {
+        // Restore capitalizations
+        if (token === token.toUpperCase()) {
+          return c.word.toUpperCase();
+        } else if (token[0] === token[0].toUpperCase()) {
+          return c.word.charAt(0).toUpperCase() + c.word.slice(1);
+        }
+        return c.word;
+      });
+
+      return {
+        text: token,
+        isWord: true,
+        isTypo: true,
+        bestSuggestion: listSugg[0] || undefined,
+        suggestions: listSugg
+      };
+    });
+
+    setCheckedResults(results);
+    setIsAnalyzing(false);
+    setSelectedWordIdx(null);
+  };
+
+  // Auto Correct All
+  const handleAutoCorrectAll = () => {
+    let correctedText = '';
+    const newResults = checkedResults.map(item => {
+      if (item.isTypo && item.bestSuggestion) {
+        correctedText += item.bestSuggestion;
+        return {
+          ...item,
+          text: item.bestSuggestion,
+          isTypo: false,
+          bestSuggestion: undefined,
+          suggestions: []
+        };
+      }
+      correctedText += item.text;
+      return item;
+    });
+    setTypoText(correctedText);
+    setCheckedResults(newResults);
+    showStatus("Seluruh kesalahan ketik berhasil diperbaiki otomatis!", 'success');
+  };
+
+  // Correct Single Token
+  const handleCorrectSingleWord = (idx: number, replacement: string) => {
+    const newResults = [...checkedResults];
+    newResults[idx] = {
+      ...newResults[idx],
+      text: replacement,
+      isTypo: false,
+      bestSuggestion: undefined,
+      suggestions: []
+    };
+    setCheckedResults(newResults);
+    
+    const newText = newResults.map(r => r.text).join('');
+    setTypoText(newText);
+    setSelectedWordIdx(null);
+    showStatus(`Kata berhasil dikoreksi menjadi "${replacement}"`, 'success');
+  };
+
+  // Document script client loader
+  const loadExternalScript = (url: string): Promise<void> => {
+    return new Promise((resolve, reject) => {
+      const existingScript = document.querySelector(`script[src="${url}"]`);
+      if (existingScript) {
+        resolve();
+        return;
+      }
+      const script = document.createElement('script');
+      script.src = url;
+      script.onload = () => resolve();
+      script.onerror = () => reject(new Error(`Gagal memuat pustaka parser: ${url}`));
+      document.head.appendChild(script);
+    });
+  };
+
+  // PDF client reader
+  const extractTextFromPDF = async (arrayBuffer: ArrayBuffer): Promise<string> => {
+    await loadExternalScript('https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.min.js');
+    const pdfjsLib = (window as any)['pdfjs-dist/build/pdf'];
+    pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.worker.min.js';
+    
+    const loadingTask = pdfjsLib.getDocument({ data: new Uint8Array(arrayBuffer) });
+    const pdf = await loadingTask.promise;
+    let fullText = '';
+    
+    for (let i = 1; i <= pdf.numPages; i++) {
+      const page = await pdf.getPage(i);
+      const textContent = await page.getTextContent();
+      const pageText = textContent.items.map((item: any) => item.str).join(' ');
+      fullText += pageText + '\n';
+    }
+    return fullText;
+  };
+
+  // DOCX client reader
+  const extractTextFromDOCX = async (arrayBuffer: ArrayBuffer): Promise<string> => {
+    await loadExternalScript('https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.6.0/mammoth.browser.min.js');
+    const mammoth = (window as any).mammoth;
+    const result = await mammoth.extractRawText({ arrayBuffer });
+    return result.value;
+  };
+
+  // Document import
+  const handleDocumentUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setFileLoading(true);
+    showStatus(`Membaca dokumen: ${file.name}...`, 'info');
+
+    try {
+      const arrayBuffer = await file.arrayBuffer();
+      let extractedText = '';
+
+      if (file.name.endsWith('.pdf')) {
+        extractedText = await extractTextFromPDF(arrayBuffer);
+      } else if (file.name.endsWith('.docx') || file.name.endsWith('.doc')) {
+        extractedText = await extractTextFromDOCX(arrayBuffer);
+      } else if (file.name.endsWith('.txt')) {
+        extractedText = new TextDecoder().decode(arrayBuffer);
+      } else {
+        throw new Error("Format tidak didukung. Unggah berkas .pdf, .docx, atau .txt");
+      }
+
+      if (!extractedText.trim()) {
+        throw new Error("Gagal mengekstrak teks atau berkas kosong.");
+      }
+
+      setTypoText(extractedText);
+      showStatus("Dokumen berhasil diunggah!", 'success');
+      handleTriggerCheck(extractedText);
+    } catch (err: any) {
+      console.error(err);
+      showStatus(err.message || "Gagal memproses dokumen.", 'error');
+    } finally {
+      setFileLoading(false);
+      if (e.target) e.target.value = '';
+    }
   };
   
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -334,9 +1041,9 @@ function MainApp() {
   // Excel Export Template
   const downloadTemplate = () => {
     const templateData = [
-      ["Kata", "Kategori", "Etimologi", "Definisi", "Contoh Kalimat"],
-      ["Integritas", "Nomina", "Dari bahasa Latin 'integritas'.", "Mutu, sifat, atau keadaan yang menunjukkan kesatuan yang utuh sehingga memiliki potensi dan kemampuan yang memancarkan kewibawaan; kejujuran.", "Setiap pemimpin harus memiliki integritas yang tinggi.;Integritas bangsa harus tetap terjaga."],
-      ["Resiliensi", "Nomina", "Dari bahasa Inggris 'resilience'.", "Kemampuan untuk beradaptasi dan tetap teguh dalam situasi sulit; daya kenyal; daya lentur.", "Resiliensi masyarakat pesisir diuji saat menghadapi banjir rob.;Pendidikan karakter membangun resiliensi mental."]
+      ["Kata", "Kategori", "Etimologi", "Definisi", "Contoh Kalimat", "Jumlah Pencarian"],
+      ["Integritas", "Nomina", "Dari bahasa Latin 'integritas'.", "Mutu, sifat, atau keadaan yang menunjukkan kesatuan yang utuh sehingga memiliki potensi dan kemampuan yang memancarkan kewibawaan; kejujuran.", "Setiap pemimpin harus memiliki integritas yang tinggi.;Integritas bangsa harus tetap terjaga.", 0],
+      ["Resiliensi", "Nomina", "Dari bahasa Inggris 'resilience'.", "Kemampuan untuk beradaptasi dan tetap teguh dalam situasi sulit; daya kenyal; daya lentur.", "Resiliensi masyarakat pesisir diuji saat menghadapi banjir rob.;Pendidikan karakter membangun resiliensi mental.", 0]
     ];
 
     const ws = XLSX.utils.aoa_to_sheet(templateData);
@@ -355,8 +1062,8 @@ function MainApp() {
     try {
       // Fetch all words for export
       const querySnapshot = await getDocs(collection(db, 'words'));
-      const exportData = [
-        ["Kata", "Kategori", "Etimologi", "Definisi", "Contoh Kalimat"]
+      const exportData: any[][] = [
+        ["Kata", "Kategori", "Etimologi", "Definisi", "Contoh Kalimat", "Jumlah Pencarian"]
       ];
 
       querySnapshot.forEach((doc) => {
@@ -366,7 +1073,8 @@ function MainApp() {
           w.category,
           w.etymology || '',
           w.definition,
-          (w.examples || []).join(';')
+          (w.examples || []).join(';'),
+          w.searchCount || 0
         ]);
       });
 
@@ -409,7 +1117,7 @@ function MainApp() {
         const data = XLSX.utils.sheet_to_json(ws, { header: 1 }) as any[][];
 
         // Validasi header (baris pertama)
-        // A: Kata, B: Kategori, C: Etimologi, D: Definisi, E: Contoh Kalimat
+        // A: Kata, B: Kategori, C: Etimologi, D: Definisi, E: Contoh Kalimat, F: Jumlah Pencarian
         const validRows = data.slice(1).filter(row => row[0] && row[3]); // Minimal ada kata dan definisi
         
         let successCount = 0;
@@ -420,13 +1128,15 @@ function MainApp() {
           const definition = String(row[3]).trim();
           // Contoh kalimat dipisahkan dengan titik koma (;)
           const examples = row[4] ? String(row[4]).split(';').map(s => s.trim()) : [];
+          const searchCount = row[5] ? Number(row[5]) : 0;
           
           const wordEntry: WordEntry = {
             word,
             category,
             etymology,
             definition,
-            examples
+            examples,
+            searchCount
           };
 
           const wordId = word.toLowerCase();
@@ -448,7 +1158,7 @@ function MainApp() {
         setError(null);
       } catch (err) {
         console.error(err);
-        setError("Gagal membaca file Excel. Pastikan format kolom sesuai: Kata, Kategori, Definisi, Contoh Kalimat.");
+        setError("Gagal membaca file Excel. Pastikan format kolom sesuai: Kata, Kategori, Etimologi, Definisi, Contoh Kalimat, Jumlah Pencarian.");
       } finally {
         setIsProcessing(false);
         if (fileInputRef.current) fileInputRef.current.value = '';
@@ -561,8 +1271,18 @@ function MainApp() {
         setResult(found);
         addToHistory(trimmedQuery);
         
-        // 3. Increment global search count (Backgrounded, Firestore handles offline queueing)
+        // 3. Increment global search count & specific word searchCount (Backgrounded, Firestore handles offline queueing)
         if (found && db) {
+          const wordId = found.word.toLowerCase();
+          
+          // Increment word specific searchCount
+          setDoc(doc(db, 'words', wordId), {
+            searchCount: increment(1)
+          }, { merge: true }).catch(e => {
+            console.warn("Word search count increment queued or failed:", e.message);
+          });
+
+          // Increment global stats searches
           setDoc(doc(db, 'stats', 'global'), {
             totalSearches: increment(1)
           }, { merge: true }).catch(e => {
@@ -825,7 +1545,34 @@ function MainApp() {
         </div>
       </header>
 
-      <main className="max-w-6xl mx-auto px-6 grid grid-cols-1 md:grid-cols-12 gap-8 md:gap-12">
+      {/* Tab Navigation */}
+      <div className="max-w-6xl mx-auto px-6 mb-8 flex border-b border-[#1a1a1a]/10 gap-8">
+        <button
+          id="tab-kamus"
+          onClick={() => { setActiveTab('kamus'); }}
+          className={`pb-4 text-xs font-sans font-bold uppercase tracking-widest border-b-2 transition-all ${
+            activeTab === 'kamus'
+              ? 'border-[#1a1a1a] text-[#1a1a1a]'
+              : 'border-transparent text-gray-400 hover:text-[#1a1a1a]'
+          }`}
+        >
+          Kamus Leksikon
+        </button>
+        <button
+          id="tab-pemeriksa"
+          onClick={() => { setActiveTab('pemeriksa'); }}
+          className={`pb-4 text-xs font-sans font-bold uppercase tracking-widest border-b-2 transition-all flex items-center gap-2 ${
+            activeTab === 'pemeriksa'
+              ? 'border-[#1a1a1a] text-[#1a1a1a]'
+              : 'border-transparent text-gray-400 hover:text-[#1a1a1a]'
+          }`}
+        >
+          Pemeriksa Typo (KBBI) <span className="bg-amber-100 text-amber-800 px-2 py-0.5 rounded-full text-[9px] font-sans font-black uppercase">Fitur Baru</span>
+        </button>
+      </div>
+
+      {activeTab === 'kamus' ? (
+        <main className="max-w-6xl mx-auto px-6 grid grid-cols-1 md:grid-cols-12 gap-8 md:gap-12">
         {/* Left Column: Search & Admin Actions */}
         <div className="md:col-span-4 space-y-12">
           {/* Search Bar */}
@@ -960,7 +1707,10 @@ function MainApp() {
                           setIsProcessing(true);
                           try {
                             for(const w of initialWords) {
-                              await setDoc(doc(db, 'words', w.word.toLowerCase()), w);
+                              await setDoc(doc(db, 'words', w.word.toLowerCase()), {
+                                ...w,
+                                searchCount: w.searchCount || 0
+                              });
                             }
                           } finally {
                             setIsProcessing(false);
@@ -1290,6 +2040,561 @@ function MainApp() {
           </React.Fragment>
         </div>
       </main>
+      ) : (
+        <main className="max-w-6xl mx-auto px-6 space-y-6">
+          {isAdmin && (
+            <div className="bg-amber-50 border border-amber-200/60 p-3 rounded-sm flex flex-col sm:flex-row items-baseline sm:items-center justify-between gap-4">
+              <div className="flex items-center gap-2">
+                <ShieldAlert size={14} className="text-amber-600" />
+                <span className="text-[10px] font-sans font-bold uppercase tracking-widest text-[#1a1a1a]">
+                  Akses Admin Terdeteksi: Manajemen Leksikon &amp; Pembayaran
+                </span>
+              </div>
+              <div className="flex bg-amber-150 p-0.5 rounded-[2px] border border-amber-200">
+                <button
+                  onClick={() => setAdminTypoMode('checker')}
+                  className={`px-3 py-1 text-[9px] uppercase font-sans font-bold tracking-wider transition-all rounded-[2px] ${adminTypoMode === 'checker' ? 'bg-[#1a1a1a] text-white' : 'text-amber-805 hover:text-[#1a1a1a]'}`}
+                >
+                  Alat Pemeriksa (Klien)
+                </button>
+                <button
+                  onClick={() => setAdminTypoMode('admin')}
+                  className={`px-3 py-1 text-[9px] uppercase font-sans font-bold tracking-wider transition-all rounded-[2px] ${adminTypoMode === 'admin' ? 'bg-[#1a1a1a] text-white' : 'text-amber-805 hover:text-[#1a1a1a]'}`}
+                >
+                  Panel Manajemen Admin (Realtime)
+                </button>
+              </div>
+            </div>
+          )}
+
+          {adminTypoMode === 'admin' && isAdmin ? (
+            <div className="bg-white border border-[#1a1a1a]/10 rounded-sm p-6 md:p-8 space-y-8 shadow-[10px_10px_0px_#f5f5f5] w-full">
+              <div className="flex flex-col md:flex-row justify-between items-start md:items-center border-b border-gray-100 pb-6 gap-4">
+                <div>
+                  <h2 className="text-2xl font-black uppercase tracking-tight font-sans text-gray-800">Panel Manajemen Admin Typo</h2>
+                  <p className="text-xs text-gray-500 font-serif mt-1">Konfirmasi pembayaran GOPAY/QRIS pengguna, unduh riwayat evaluasi kata, dan konfigurasikan saluran pembayaran.</p>
+                </div>
+                <div className="flex bg-gray-50 p-1 border border-gray-100 rounded-sm">
+                  <button
+                    onClick={() => setSelectedAdminSubTab('rekap_bayar')}
+                    className={`px-4 py-2 text-[10px] uppercase font-sans font-bold tracking-wider transition-all rounded-sm ${selectedAdminSubTab === 'rekap_bayar' ? 'bg-[#1a1a1a] text-white shadow-md' : 'text-gray-500 hover:text-[#1a1a1a]'}`}
+                  >
+                    Rekapitulasi Pembayaran
+                  </button>
+                  <button
+                    onClick={() => setSelectedAdminSubTab('riwayat_eval')}
+                    className={`px-4 py-2 text-[10px] uppercase font-sans font-bold tracking-wider transition-all rounded-sm ${selectedAdminSubTab === 'riwayat_eval' ? 'bg-[#1a1a1a] text-white shadow-md' : 'text-gray-500 hover:text-[#1a1a1a]'}`}
+                  >
+                    Riwayat Pemeriksaan
+                  </button>
+                  <button
+                    onClick={() => setSelectedAdminSubTab('pengaturan_bayar')}
+                    className={`px-4 py-2 text-[10px] uppercase font-sans font-bold tracking-wider transition-all rounded-sm ${selectedAdminSubTab === 'pengaturan_bayar' ? 'bg-[#1a1a1a] text-white shadow-md' : 'text-gray-500 hover:text-[#1a1a1a]'}`}
+                  >
+                    Pengaturan Saluran
+                  </button>
+                </div>
+              </div>
+
+              {/* REKAPITULASI PEMBAYARAN */}
+              {selectedAdminSubTab === 'rekap_bayar' && (
+                <div className="space-y-6 animate-in fade-in duration-300">
+                  <div className="flex justify-between items-center">
+                    <h3 className="text-xs font-sans font-black uppercase tracking-widest text-[#1a1a1a]">Manajemen Status Pengguna &amp; Pembayaran</h3>
+                    <span className="text-[10px] bg-amber-50 border border-amber-200 text-amber-850 px-2.5 py-1 font-mono rounded-sm font-bold">
+                      Total Permohonan: {allPayments.length}
+                    </span>
+                  </div>
+
+                  <div className="overflow-x-auto border border-gray-200 rounded-sm font-sans">
+                    <table className="w-full text-left font-sans text-xs">
+                      <thead>
+                        <tr className="bg-gray-50 border-b border-gray-200 text-gray-500 uppercase tracking-widest text-[9px] font-black">
+                          <th className="px-6 py-4">Nomor Email Masuk</th>
+                          <th className="px-6 py-4">Status Layanan</th>
+                          <th className="px-6 py-4">Jumlah Transfer</th>
+                          <th className="px-6 py-4">Waktu Pengajuan</th>
+                          <th className="px-6 py-4 text-right">Aksi Tindak</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-150">
+                        {allPayments.length === 0 ? (
+                          <tr>
+                            <td colSpan={5} className="px-6 py-12 text-center text-gray-400 font-serif italic text-sm">
+                              Tidak ada daftar pengajuan pembayaran yang masuk saat ini.
+                            </td>
+                          </tr>
+                        ) : (
+                          allPayments.map((pay, idx) => (
+                            <tr key={idx} className="hover:bg-[#fdfbf7]/50 transition-colors">
+                              <td className="px-6 py-4 font-mono font-bold text-gray-750">{pay.email}</td>
+                              <td className="px-6 py-4">
+                                {pay.status === 'pending' ? (
+                                  <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[9px] font-bold uppercase tracking-widest bg-amber-50 text-amber-800 border border-amber-200 animate-pulse">
+                                    <Clock size={10} /> Pending
+                                  </span>
+                                ) : (
+                                  <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[9px] font-bold uppercase tracking-widest bg-green-50 text-green-800 border border-green-200">
+                                    <Check size={10} /> Disetujui
+                                  </span>
+                                )}
+                              </td>
+                              <td className="px-6 py-4 font-mono text-gray-950 font-bold">
+                                Rp. {String(pay.amount || 5000).replace(/\B(?=(\d{3})+(?!\d))/g, ".")}
+                              </td>
+                              <td className="px-6 py-4 text-gray-400">
+                                {pay.requestedAt ? new Date(pay.requestedAt).toLocaleString("id-ID") : "-"}
+                              </td>
+                              <td className="px-6 py-4 text-right">
+                                {pay.status === 'pending' && (
+                                  <button
+                                    onClick={() => handleApprovePayment(pay.id, pay.email)}
+                                    className="px-3 py-1.5 bg-[#1a1a1a] hover:bg-gray-800 text-white rounded-[2px] transition-all text-[9px] uppercase font-sans font-black tracking-widest flex items-center justify-center gap-1 ml-auto"
+                                  >
+                                    <Check size={10} /> Setujui Pembayaran
+                                  </button>
+                                )}
+                                {pay.status === 'approved' && (
+                                  <span className="text-[10px] text-gray-400 font-serif italic">Terverifikasi</span>
+                                )}
+                              </td>
+                            </tr>
+                          ))
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+
+              {/* RIWAYAT PEMERIKSAAN */}
+              {selectedAdminSubTab === 'riwayat_eval' && (
+                <div className="space-y-6 animate-in fade-in duration-300">
+                  <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+                    <div>
+                      <h3 className="text-xs font-sans font-black uppercase tracking-widest text-[#1a1a1a]">Riwayat Pemeriksaan / Evaluasi Typo Pengguna</h3>
+                      <p className="text-[11px] text-gray-400 font-serif mt-1">Seluruh kata, deteksi kesalahan, teks masukan, dan presisi akurasi pengguna direkam secara deterministik.</p>
+                    </div>
+                    <button
+                      onClick={downloadTypoEvaluations}
+                      className="px-5 py-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded-[2px] text-[10px] uppercase font-sans font-black tracking-widest flex items-center gap-2 transition-all shadow-md shrink-0 font-sans"
+                    >
+                      <Download size={12} /> Unduh Riwayat (Excel)
+                    </button>
+                  </div>
+
+                  <div className="overflow-x-auto border border-gray-200 rounded-sm">
+                    <table className="w-full text-left font-sans text-xs">
+                      <thead>
+                        <tr className="bg-gray-50 border-b border-gray-200 text-gray-500 uppercase tracking-widest text-[9px] font-black font-sans">
+                          <th className="px-6 py-4">Email</th>
+                          <th className="px-6 py-4">Total Kata</th>
+                          <th className="px-6 py-4">Typo Terdeteksi</th>
+                          <th className="px-6 py-4">Skor Presisi</th>
+                          <th className="px-6 py-4">Hasil Teks</th>
+                          <th className="px-6 py-4">Waktu Check</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-150">
+                        {allEvaluations.length === 0 ? (
+                          <tr>
+                            <td colSpan={6} className="px-6 py-12 text-center text-gray-400 font-serif italic text-sm">
+                              Belum ada riwayat hasil pemeriksaan terdeteksi.
+                            </td>
+                          </tr>
+                        ) : (
+                          allEvaluations.map((ev, idx) => (
+                            <tr key={idx} className="hover:bg-[#fdfbf7]/50 transition-colors">
+                              <td className="px-6 py-4 font-mono font-bold text-gray-750">{ev.email}</td>
+                              <td className="px-6 py-4 font-mono">{ev.totalWords || 0} kata</td>
+                              <td className="px-6 py-4 font-mono text-red-500 font-bold">{ev.typosCount || 0} kata</td>
+                              <td className="px-6 py-4 font-mono text-emerald-600 font-bold">{ev.precision || '100%'}</td>
+                              <td className="px-6 py-4 font-serif text-gray-500 truncate max-w-[150px]" title={ev.inputText}>{ev.inputText}</td>
+                              <td className="px-6 py-4 text-gray-400 font-mono">
+                                {ev.timestamp ? new Date(ev.timestamp).toLocaleString("id-ID") : "-"}
+                              </td>
+                            </tr>
+                          ))
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+
+              {/* PENGATURAN SALURAN GOPAY / QRIS */}
+              {selectedAdminSubTab === 'pengaturan_bayar' && (
+                <div className="space-y-6 max-w-xl animate-in fade-in duration-300">
+                  <div>
+                    <h3 className="text-xs font-sans font-black uppercase tracking-widest text-[#1a1a1a]">Konfigurasi Gopay &amp; QRIS</h3>
+                    <p className="text-[11px] text-gray-400 font-serif mt-1">Ubah nomor pengantaran gopay dan tautan QRIS bayar. Perubahan disimpan ke Firestore dan langsung berefek pada pop-up transaksi klien secara realtime.</p>
+                  </div>
+
+                  <div className="space-y-6 pt-4">
+                    <div className="space-y-2">
+                      <label className="block text-[9px] font-sans font-bold uppercase tracking-widest text-[#1a1a1a] opacity-55 font-sans">Nomor Handphone GoPay</label>
+                      <input
+                        type="text"
+                        value={gopayInput}
+                        onChange={(e) => setGopayInput(e.target.value)}
+                        placeholder="Contoh: 081234567890"
+                        className="w-full text-base font-mono border-b border-gray-200 focus:border-[#1a1a1a] focus:outline-none py-2 bg-transparent text-gray-800"
+                      />
+                    </div>
+
+                    <div className="space-y-4">
+                      <label className="block text-[9px] font-sans font-bold uppercase tracking-widest text-[#1a1a1a] opacity-55 font-sans">Opsi Model Gambar QRIS</label>
+                      <div className="flex border border-gray-200 p-0.5 rounded-sm bg-gray-50/50">
+                        <button
+                          type="button"
+                          onClick={() => setQrisOption('url')}
+                          className={`flex-1 py-2 text-[10px] uppercase font-sans font-bold tracking-wider transition-all rounded-[2px] ${qrisOption === 'url' ? 'bg-[#1a1a1a] text-white shadow-sm' : 'text-gray-500 hover:text-[#1a1a1a]'}`}
+                        >
+                          Pakai Link URL
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setQrisOption('upload')}
+                          className={`flex-1 py-2 text-[10px] uppercase font-sans font-bold tracking-wider transition-all rounded-[2px] ${qrisOption === 'upload' ? 'bg-[#1a1a1a] text-white shadow-sm' : 'text-gray-500 hover:text-[#1a1a1a]'}`}
+                        >
+                          Upload Foto QRIS
+                        </button>
+                      </div>
+
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-6 items-start pt-2">
+                        <div className="space-y-4">
+                          {qrisOption === 'url' ? (
+                            <div className="space-y-2 animate-in fade-in duration-200">
+                              <label className="block text-[9px] font-sans font-bold uppercase tracking-widest text-[#1a1a1a] opacity-55 font-sans">Tautan / URL Gambar QRIS</label>
+                              <input
+                                type="text"
+                                value={qrisImageInput}
+                                onChange={(e) => setQrisImageInput(e.target.value)}
+                                placeholder="Contoh: https://example.com/qris.png"
+                                className="w-full text-base font-mono border-b border-gray-200 focus:border-[#1a1a1a] focus:outline-none py-2 bg-transparent text-gray-800"
+                              />
+                              <p className="text-[10px] text-gray-400 font-serif italic">Ketik atau tempel URL gambar QRIS langsung.</p>
+                            </div>
+                          ) : (
+                            <div className="space-y-2 animate-in fade-in duration-200">
+                              <label className="block text-[9px] font-sans font-bold uppercase tracking-widest text-[#1a1a1a] opacity-55 font-sans">Unggah Gambar QRIS (.png, .jpg, .jpeg)</label>
+                              <div className="border border-dashed border-gray-300 hover:border-[#1a1a1a] bg-gray-50/50 rounded-sm p-4 text-center cursor-pointer relative transition-all">
+                                <input
+                                  id="qris-file-upload-input"
+                                  type="file"
+                                  accept="image/png, image/jpeg, image/jpg"
+                                  onChange={handleQrisFileUpload}
+                                  className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                                />
+                                <div className="flex flex-col items-center justify-center gap-1 text-gray-400">
+                                  <Upload size={18} />
+                                  <span className="text-[10px] font-sans font-semibold uppercase tracking-wider text-gray-500">Pilih File QRIS</span>
+                                  <span className="text-[9px] font-serif italic text-gray-400">klik atau seret ke sini (Maks 1MB)</span>
+                                </div>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Visual Preview */}
+                        <div className="border border-gray-100 rounded-sm p-4 bg-gray-50/50 flex flex-col items-center justify-center min-h-[160px] text-center border-dashed">
+                          <span className="text-[9px] font-sans font-bold uppercase tracking-widest text-gray-400 mb-2">Pratinjau QRIS Aktif</span>
+                          {qrisImageInput ? (
+                            <div className="relative">
+                              <img
+                                src={qrisImageInput}
+                                alt="Pratinjau QRIS"
+                                className="w-28 h-28 object-contain border border-gray-200 p-1 bg-white rounded-[2px]"
+                                onError={(e) => {
+                                  (e.target as HTMLImageElement).src = "https://placehold.co/150?text=Invalid+Image+URL";
+                                }}
+                              />
+                              <button
+                                type="button"
+                                onClick={() => setQrisImageInput('')}
+                                className="absolute -top-2 -right-2 bg-red-500 hover:bg-red-600 text-white rounded-full p-1 shadow-md transition-all flex items-center justify-center"
+                                title="Hapus Gambar"
+                              >
+                                <X size={10} />
+                              </button>
+                            </div>
+                          ) : (
+                            <span className="text-[10px] text-gray-400 font-serif italic">Belum ada gambar QRIS terpasang. Unggah file gambar atau masukkan URL.</span>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="pt-4">
+                      <button
+                        onClick={handleSavePaymentSettings}
+                        className="px-6 py-3.5 bg-[#1a1a1a] hover:bg-gray-800 text-white rounded-sm text-[10px] uppercase font-sans font-black tracking-widest flex items-center justify-center gap-2 transition-all shadow-md w-full sm:w-auto font-sans"
+                      >
+                        <Settings size={12} /> Simpan Pengaturan Saluran
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 lg:gap-12 w-full">
+            {/* Left Column: Input Panel */}
+            <div className="lg:col-span-7 space-y-6">
+              <div className="bg-white p-6 md:p-8 border border-gray-200 rounded-sm relative shadow-sm">
+                <div className="flex justify-between items-center mb-4">
+                  <div>
+                    <h3 className="text-[10px] font-sans font-bold uppercase tracking-widest opacity-50">Teks Input</h3>
+                    <p className="text-xs text-gray-500 font-sans">Tulis manual, salin-tempel (copy-paste), atau unggah dokumen.</p>
+                  </div>
+                  {typoText && (
+                    <button
+                      onClick={() => {
+                        setTypoText('');
+                        setCheckedResults([]);
+                        setSelectedWordIdx(null);
+                      }}
+                      className="text-xs text-red-500 font-sans font-bold hover:underline"
+                    >
+                      Bersihkan
+                    </button>
+                  )}
+                </div>
+
+                <textarea
+                  id="typed-input-field"
+                  value={typoText}
+                  onChange={(e) => {
+                    const txt = e.target.value;
+                    setTypoText(txt);
+                    // Reset results if text is cleared
+                    if (!txt.trim()) {
+                      setCheckedResults([]);
+                    }
+                  }}
+                  placeholder="Ketik atau tempel teks di sini..."
+                  rows={8}
+                  className="w-full text-lg border border-gray-100 rounded-sm focus:border-[#1a1a1a] focus:outline-none p-4 bg-[#fdfbf7] font-serif leading-relaxed placeholder:opacity-50 resize-y"
+                />
+
+                <div className="flex flex-wrap items-center justify-between gap-4 mt-4">
+                  {/* Document Uploader */}
+                  <div className="flex items-center gap-2">
+                    <label className={`px-4 py-2 bg-white text-[#1a1a1a] border border-gray-200 rounded-sm text-[10px] font-sans font-bold uppercase tracking-widest flex items-center gap-2 ${fileLoading ? 'opacity-50 cursor-not-allowed' : 'hover:bg-gray-50 hover:border-[#1a1a1a] cursor-pointer'} transition-all`}>
+                      {fileLoading ? (
+                        <>
+                          <Loader2 size={12} className="animate-spin" />
+                          <span>Membaca...</span>
+                        </>
+                      ) : (
+                        <>
+                          <FileText size={12} />
+                          <span>Unggah PDF / DOC / TXT</span>
+                        </>
+                      )}
+                      <input
+                        type="file"
+                        accept=".pdf, .docx, .doc, .txt"
+                        className="hidden"
+                        onChange={handleDocumentUpload}
+                        disabled={fileLoading}
+                      />
+                    </label>
+                  </div>
+
+                  {/* Submit Button */}
+                  <button
+                    id="analyze-typo-button"
+                    onClick={() => handleTriggerCheck()}
+                    disabled={isAnalyzing || !typoText.trim()}
+                    className="px-6 py-2.5 bg-[#1a1a1a] text-white hover:bg-gray-800 disabled:opacity-30 disabled:hover:bg-[#1a1a1a] transition-all text-[10px] font-sans font-bold uppercase tracking-widest flex items-center gap-2"
+                  >
+                    {isAnalyzing ? <Loader2 size={12} className="animate-spin" /> : <RefreshCw size={12} />}
+                    Periksa Kesalahan
+                  </button>
+                </div>
+              </div>
+
+              {/* Informational Guidelines Card */}
+              <div className="p-6 border border-amber-200/60 bg-amber-50/30 rounded-sm flex gap-4">
+                <AlertCircle className="text-amber-600 shrink-0 mt-0.5" size={18} />
+                <div className="space-y-1">
+                  <h4 className="text-[10px] font-sans font-bold uppercase tracking-wider text-amber-900">Petunjuk Pemeriksa Typo</h4>
+                  <p className="text-xs text-amber-800 font-serif leading-relaxed">
+                    Sistem akan memecah teks Anda dan menganalisis setiap kata terhadap kamus KBBI di database serta daftar kosakata yang telah diimpor. Untuk dokumen <strong>PDF</strong> dan <strong>DOC/DOCX</strong>, teks akan terbaca otomatis di browser Anda tanpa perlu koneksi internet ataupun API AI pihak ketiga.
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            {/* Right Column: Dynamic Results Panel */}
+            <div className="lg:col-span-5 space-y-6">
+              <div className="bg-white border border-gray-200 rounded-sm p-6 md:p-8 shadow-sm space-y-6">
+                <div>
+                  <h3 className="text-[10px] font-sans font-bold uppercase tracking-widest opacity-50 mb-1">Hasil Evaluasi & Koreksi</h3>
+                  <p className="text-xs text-gray-500 font-sans">Koreksi otomatis atau ketuk kata yang dihias merah untuk melihat saran.</p>
+                </div>
+
+                {checkedResults.length > 0 ? (
+                  <div className="space-y-6">
+                    {/* Metrics Banner */}
+                    <div className="grid grid-cols-3 gap-2 py-4 px-4 bg-[#fdfbf7] border border-gray-100 rounded-sm text-center">
+                      <div>
+                        <p className="text-[8px] font-sans font-bold uppercase tracking-[0.15em] opacity-40 mb-0.5">Total Kata</p>
+                        <p className="text-lg font-black font-sans text-[#1a1a1a]">
+                          {checkedResults.filter(r => r.isWord).length}
+                        </p>
+                      </div>
+                      <div>
+                        <p className="text-[8px] font-sans font-bold uppercase tracking-[0.15em] opacity-40 mb-0.5">Typo Terdeteksi</p>
+                        <p className={`text-lg font-black font-sans ${checkedResults.some(r => r.isTypo) ? 'text-amber-600' : 'text-green-600'}`}>
+                          {checkedResults.filter(r => r.isTypo).length}
+                        </p>
+                      </div>
+                      <div>
+                        <p className="text-[8px] font-sans font-bold uppercase tracking-[0.15em] opacity-40 mb-0.5">Skor Presisi</p>
+                        <p className="text-lg font-black font-sans text-green-600">
+                          {(() => {
+                            const totWords = checkedResults.filter(r => r.isWord).length;
+                            if (totWords === 0) return '100%';
+                            const typos = checkedResults.filter(r => r.isTypo).length;
+                            return `${Math.round(((totWords - typos) / totWords) * 100)}%`;
+                          })()}
+                        </p>
+                      </div>
+                    </div>
+
+                    {/* Interactive Editor View */}
+                    <div className="border border-gray-100 rounded-sm p-4 bg-[#fdfbf7] max-h-60 overflow-y-auto leading-relaxed text-lg font-serif">
+                      {checkedResults.map((item, idx) => {
+                        if (!item.isWord) {
+                          // Preserve tabs, newlines, spaces
+                          if (item.text.includes('\n')) {
+                            return (
+                              <span key={idx}>
+                                {item.text.split('\n').map((line, lIdx) => (
+                                  <React.Fragment key={lIdx}>
+                                    {lIdx > 0 && <br />}
+                                    <span>{line}</span>
+                                  </React.Fragment>
+                                ))}
+                              </span>
+                            );
+                          }
+                          return <span key={idx}>{item.text}</span>;
+                        }
+
+                        if (item.isTypo) {
+                          const isSelected = selectedWordIdx === idx;
+                          return (
+                            <span key={idx} className="relative inline-block">
+                              <span
+                                onClick={() => {
+                                  setSelectedWordIdx(isSelected ? null : idx);
+                                }}
+                                className={`cursor-pointer underline decoration-wavy decoration-amber-500 font-bold ${
+                                  isSelected ? 'bg-amber-100 text-amber-950' : 'text-amber-700 hover:bg-amber-50'
+                                } px-1 rounded-sm transition-all`}
+                                title="Ketuk untuk melihat saran perbaikan"
+                              >
+                                {item.text}
+                              </span>
+                              {isSelected && item.suggestions && item.suggestions.length > 0 && (
+                                <span className="absolute z-50 left-1/2 -translate-x-1/2 bottom-full mb-2 bg-white border border-[#1a1a1a] shadow-xl p-3 rounded-sm w-48 text-left space-y-2">
+                                  <span className="block text-[8px] font-sans font-bold uppercase tracking-wider opacity-40">Saran Perbaikan</span>
+                                  <span className="flex flex-col gap-1">
+                                    {item.suggestions.map((sugg, sIdx) => (
+                                      <button
+                                        key={sIdx}
+                                        onClick={() => handleCorrectSingleWord(idx, sugg)}
+                                        className="text-xs text-[#1a1a1a] hover:bg-amber-50 text-left px-2 py-1 rounded-sm font-sans font-semibold border border-transparent hover:border-amber-200 transition-colors"
+                                      >
+                                        {sugg}
+                                      </button>
+                                    ))}
+                                  </span>
+                                  <button
+                                    onClick={() => setSelectedWordIdx(null)}
+                                    className="block text-[8px] font-sans font-bold text-center w-full uppercase text-gray-400 pt-1 border-t hover:text-[#1a1a1a]"
+                                  >
+                                    Tutup
+                                  </button>
+                                </span>
+                              )}
+                            </span>
+                          );
+                        }
+
+                        return <span key={idx}>{item.text}</span>;
+                      })}
+                    </div>
+
+                    {/* Suggestions Box */}
+                    {checkedResults.some(r => r.isTypo) && (
+                      <div className="space-y-3">
+                        <div className="flex justify-between items-center">
+                          <h4 className="text-[10px] font-sans font-bold uppercase tracking-wider opacity-50">Koreksi Cepat</h4>
+                          <button
+                            id="autocorrect-all-button"
+                            onClick={handleAutoCorrectAll}
+                            className="text-xs font-sans font-bold text-amber-700 hover:text-amber-900 flex items-center gap-1.5 transition-colors"
+                          >
+                            <Check size={12} /> Perbaiki Semua Typo
+                          </button>
+                        </div>
+                        
+                        <div className="space-y-2 max-h-48 overflow-y-auto">
+                          {checkedResults.map((item, idx) => {
+                            if (!item.isTypo) return null;
+                            return (
+                              <div key={idx} className="flex items-center justify-between p-3 bg-[#fdfbf7] border border-gray-100 rounded-sm text-xs font-sans">
+                                <div>
+                                  <span className="text-red-500 line-through mr-2 font-serif">{item.text}</span>
+                                  <span className="text-gray-400">→</span>
+                                  <span className="text-green-600 font-bold ml-2 font-serif">{item.bestSuggestion || '(Tidak ada saran)'}</span>
+                                </div>
+                                {item.bestSuggestion && (
+                                  <button
+                                    onClick={() => handleCorrectSingleWord(idx, item.bestSuggestion!)}
+                                    className="px-2 py-1 text-[9px] bg-white border border-gray-200 rounded hover:border-[#1a1a1a] font-bold uppercase tracking-wide transition-colors"
+                                  >
+                                    Terapkan
+                                  </button>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Copy Corrected Text panel */}
+                    <div className="pt-4 border-t border-gray-100 flex gap-2">
+                      <button
+                        onClick={() => {
+                          const fullCorrected = checkedResults.map(r => r.text).join('');
+                          navigator.clipboard.writeText(fullCorrected);
+                          showStatus("Teks hasil koreksi disalin ke clipboard!", "success");
+                        }}
+                        className="w-full py-3 border border-[#1a1a1a] hover:bg-[#1a1a1a] hover:text-white text-[#1a1a1a] transition-all rounded-sm text-[10px] font-sans font-bold uppercase tracking-widest flex items-center justify-center gap-2"
+                      >
+                        <Copy size={12} /> Salin Hasil Teks
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="py-20 text-center border-2 border-dashed border-gray-200 rounded-sm">
+                    <div className="bg-green-50 text-green-500 rounded-full w-12 h-12 flex items-center justify-center border border-green-200 mx-auto mb-4">
+                      <Check size={20} />
+                    </div>
+                    <p className="text-sm italic text-gray-400 px-6 font-serif">Unggah berkas atau ketik teks di sebelah kiri lalu klik "Periksa Kesalahan" untuk memulai analisis kata.</p>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div> )}
+        </main>
+      )}
 
       {/* Login Modal */}
       {showLoginModal && (
@@ -1354,6 +2659,164 @@ function MainApp() {
             </div>
           </div>
         )}
+
+      {/* Email Verification Prompt Modal */}
+      {showEmailPromptModal && (
+        <div id="email-prompt-modal" className="fixed inset-0 z-50 flex items-center justify-center p-4 animate-in fade-in duration-200">
+          <div 
+            onClick={() => setShowEmailPromptModal(false)}
+            className="absolute inset-0 bg-[#1a1a1a]/40 backdrop-blur-sm"
+          />
+          <div className="relative bg-white w-full max-w-md p-8 shadow-2xl border border-[#1a1a1a] rounded-sm">
+            <div className="flex justify-between items-center mb-6">
+              <h2 className="text-xl font-black uppercase tracking-tighter font-sans text-[#1a1a1a]">Verifikasi Email</h2>
+              <button onClick={() => setShowEmailPromptModal(false)} className="text-gray-400 hover:text-[#1a1a1a]">
+                <X size={20} />
+              </button>
+            </div>
+            
+            <p className="text-xs text-gray-500 font-serif leading-relaxed mb-6">
+              Untuk menggunakan layanan Pemeriksa Typo (KBBI), silahkan masukkan alamat email aktif Anda. Email ini digunakan untuk melacak batas penggunaan gratis (10x pemeriksaan pertama) serta memvalidasi akses bypass bebas biaya.
+            </p>
+
+            <form onSubmit={handleEmailSubmit} className="space-y-6">
+              <div>
+                <label className="block text-[9px] font-sans font-bold uppercase tracking-widest mb-2 opacity-50">Email Aktif</label>
+                <input 
+                  type="email" 
+                  required
+                  value={tempEmailInput}
+                  onChange={(e) => {
+                    setTempEmailInput(e.target.value);
+                    setEmailInputError('');
+                  }}
+                  className="w-full text-lg border-b border-gray-200 focus:border-[#1a1a1a] focus:outline-none py-2 bg-transparent font-sans text-gray-800"
+                  placeholder="contoh@gmail.com"
+                />
+                {emailInputError && (
+                  <p className="text-xs text-red-500 font-sans mt-2 italic">{emailInputError}</p>
+                )}
+              </div>
+
+              <div className="flex gap-4">
+                <button 
+                  type="button"
+                  onClick={() => setShowEmailPromptModal(false)}
+                  className="w-1/2 py-3 border border-gray-200 hover:border-[#1a1a1a] font-sans font-bold uppercase tracking-widest text-[10px] text-gray-500 hover:text-[#1a1a1a] transition-all rounded-sm"
+                >
+                  Batal
+                </button>
+                <button 
+                  type="submit"
+                  className="w-1/2 bg-[#1a1a1a] hover:bg-gray-800 text-white py-3 font-sans font-bold uppercase tracking-widest text-[10px] transition-all rounded-sm flex items-center justify-center gap-2"
+                >
+                  Daftar & Periksa
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Payment Gateway Modal (Pay Per Use - Rp 5.000) */}
+      {showPaymentModal && (
+        <div id="payment-gate-modal" className="fixed inset-0 z-50 flex items-center justify-center p-4 animate-in fade-in duration-200">
+          <div 
+            onClick={() => setShowPaymentModal(false)}
+            className="absolute inset-0 bg-[#1a1a1a]/40 backdrop-blur-sm"
+          />
+          <div className="relative bg-white w-full max-w-lg p-8 shadow-2xl border border-[#1a1a1a] rounded-sm max-h-[90vh] overflow-y-auto">
+            <div className="flex justify-between items-center mb-6">
+              <h2 className="text-xl font-black uppercase tracking-tighter font-sans text-[#1a1a1a]">Batas Gratis Habis</h2>
+              <button onClick={() => setShowPaymentModal(false)} className="text-gray-400 hover:text-[#1a1a1a]">
+                <X size={20} />
+              </button>
+            </div>
+
+            {payStatus === 'pending' ? (
+              <div className="text-center py-6 space-y-4">
+                <div className="inline-flex bg-amber-50 text-amber-500 border border-amber-200 p-3 rounded-full animate-pulse">
+                  <Clock size={32} />
+                </div>
+                <h3 className="font-sans font-bold uppercase tracking-widest text-xs text-amber-800">Menunggu Konfirmasi Admin</h3>
+                <p className="text-xs text-gray-600 font-serif leading-relaxed px-4">
+                  Permohonan pembayaran Anda untuk email <strong className="font-mono text-[11px] bg-gray-50 px-1 py-0.5 border border-gray-100">{typoEmail}</strong> sedang diverifikasi oleh Admin. Harap tunggu hingga Admin memberikan persetujuan pembayaran di Panel Admin.
+                </p>
+                <button
+                  onClick={() => setShowPaymentModal(false)}
+                  className="px-6 py-2.5 bg-[#1a1a1a] hover:bg-gray-800 text-white text-[10px] uppercase font-sans font-black tracking-widest transition-all rounded-sm"
+                >
+                  Tutup Jendela
+                </button>
+              </div>
+            ) : (
+              <div className="space-y-6">
+                <p className="text-xs text-gray-500 font-serif leading-relaxed">
+                  Batas penggunaan gratis maksimum 10x untuk email terdaftar (<span className="font-mono italic font-bold text-gray-800">{typoEmail}</span>) telah terlapaui. Silakan lakukan pembayaran satu kali (pay-per-use) sebesar <strong>Rp. 5.000,00</strong> ke GOPAY atau QRIS di bawah ini untuk mengaktifkan akses kembali.
+                </p>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6 bg-amber-50/40 p-4 border border-amber-100 rounded-sm">
+                  <div className="space-y-2">
+                    <h4 className="text-[9px] font-sans font-bold uppercase tracking-widest text-amber-900">Saluran Gopay</h4>
+                    <div className="space-y-1">
+                      <p className="text-xs font-serif text-gray-700">Nomor GoPay:</p>
+                      <p className="text-lg font-mono font-black text-[#1a1a1a]">{paymentSettings.gopayNumber}</p>
+                    </div>
+                    <div className="pt-2 text-[10px] text-amber-800/85 italic leading-relaxed">
+                      Catatan pengiriman/nama transfer harap dicantumkan email Anda: <strong>{typoEmail}</strong> agar admin dapat melakukan validasi secara instan.
+                    </div>
+                  </div>
+
+                  <div className="flex flex-col items-center justify-center border-l border-amber-200/40 pl-0 md:pl-4">
+                    <p className="text-[9px] font-sans font-black uppercase tracking-widest text-[#1a1a1a] mb-2 text-center">Pindai QRIS</p>
+                    <img 
+                      src={paymentSettings.qrisImageUrl} 
+                      alt="QRIS QR Code" 
+                      className="w-32 h-32 border border-gray-200 p-1 bg-white rounded-sm"
+                      referrerPolicy="no-referrer"
+                    />
+                  </div>
+                </div>
+
+                <div className="space-y-3">
+                  <h4 className="text-[9px] font-sans font-black uppercase tracking-widest text-gray-400">Verifikasi Pembayaran</h4>
+                  <p className="text-[11px] text-gray-500 font-serif">
+                    Setelah Anda melakukan transfer, klik tombol di bawah untuk meminta validasi dari Administrator. Panel Admin akan mendeteksi pengajuan Anda secara otomatis.
+                  </p>
+                  <div>
+                    <span className="text-[9px] font-sans font-bold uppercase tracking-widest block mb-1 opacity-50">Email Anda</span>
+                    <input 
+                      type="text" 
+                      disabled 
+                      value={typoEmail} 
+                      className="w-full bg-gray-50 text-gray-400 text-xs font-mono border border-gray-200 px-3 py-2 rounded-sm"
+                    />
+                  </div>
+                </div>
+
+                <div className="flex gap-4 pt-2">
+                  <button 
+                    type="button"
+                    onClick={() => setShowPaymentModal(false)}
+                    className="w-1/2 py-3 border border-gray-200 hover:border-[#1a1a1a] font-sans font-bold uppercase tracking-widest text-[10px] text-gray-500 hover:text-[#1a1a1a] transition-all rounded-sm"
+                  >
+                    Batal
+                  </button>
+                  <button 
+                    type="button"
+                    onClick={handleRegisterPayment}
+                    disabled={isSubmittingPayment}
+                    className="w-1/2 bg-[#1a1a1a] hover:bg-gray-800 text-white py-3 font-sans font-bold uppercase tracking-widest text-[10px] transition-all rounded-sm flex items-center justify-center gap-2 disabled:opacity-50"
+                  >
+                    {isSubmittingPayment ? <Loader2 size={12} className="animate-spin" /> : <CreditCard size={12} />}
+                    Saya Sudah Bayar
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Status Toast Notification Dashboard */}
       {statusMessage && (

@@ -14,6 +14,7 @@
           "items": { "type": "string" },
           "description": "List of usage examples"
         },
+        "searchCount": { "type": "integer", "description": "Number of times this word was searched" },
         "updatedAt": { "type": "string", "format": "date-time", "description": "Last modified timestamp" }
       },
       "required": ["word", "category", "definition", "examples"]
@@ -26,6 +27,55 @@
         "totalSearches": { "type": "integer", "description": "Accumulated search count" },
         "totalInstalls": { "type": "integer", "description": "Accumulated installation count" }
       }
+    },
+    "TypoUser": {
+      "title": "Typo Checker User profile",
+      "description": "Tracks users typo checker email usage and payment status.",
+      "type": "object",
+      "properties": {
+        "email": { "type": "string", "description": "User email address" },
+        "usageCount": { "type": "integer", "description": "Number of checks performed" },
+        "paymentStatus": { "type": "string", "description": "User payment status: none, pending, or approved" },
+        "lastPaymentRequestedAt": { "type": "string", "format": "date-time", "description": "Timestamp of the last payment request" }
+      },
+      "required": ["email", "usageCount", "paymentStatus"]
+    },
+    "Payment": {
+      "title": "Payment Log",
+      "description": "Payment requests from users to unlock unlimited checks.",
+      "type": "object",
+      "properties": {
+        "email": { "type": "string", "description": "User email address" },
+        "amount": { "type": "integer", "description": "Payment amount in IDR" },
+        "status": { "type": "string", "description": "Payment status: pending or approved" },
+        "requestedAt": { "type": "string", "format": "date-time", "description": "Timestamp of request" },
+        "approvedAt": { "type": "string", "format": "date-time", "description": "Timestamp of approval" }
+      },
+      "required": ["email", "amount", "status", "requestedAt"]
+    },
+    "Evaluation": {
+      "title": "Typo Evaluation Log",
+      "description": "Stores history of typo analysis results.",
+      "type": "object",
+      "properties": {
+        "email": { "type": "string", "description": "Email address of the user who performed the check" },
+        "totalWords": { "type": "integer", "description": "Total words analyzed" },
+        "typosCount": { "type": "integer", "description": "Amount of typo words detected" },
+        "precision": { "type": "string", "description": "Precision index of the check" },
+        "inputText": { "type": "string", "description": "The exact input text that was analyzed" },
+        "timestamp": { "type": "string", "format": "date-time", "description": "Execution timestamp" }
+      },
+      "required": ["email", "totalWords", "typosCount", "precision", "inputText", "timestamp"]
+    },
+    "GlobalSettings": {
+      "title": "Global Settings",
+      "description": "App configurations like payment instructions and channels.",
+      "type": "object",
+      "properties": {
+        "gopayNumber": { "type": "string", "description": "GoPay payout destination number" },
+        "qrisImageUrl": { "type": "string", "description": "Direct image URL for QRIS QR" }
+      },
+      "required": ["gopayNumber"]
     }
   },
   "firestore": {
@@ -36,6 +86,22 @@
     "/stats/{statId}": {
       "schema": "AppStats",
       "description": "Global app statistics."
+    },
+    "/users/{emailId}": {
+      "schema": "TypoUser",
+      "description": "Typo checker users usage logs."
+    },
+    "/payments/{paymentId}": {
+      "schema": "Payment",
+      "description": "Recapitulation of payments."
+    },
+    "/evaluations/{evalId}": {
+      "schema": "Evaluation",
+      "description": "History of inputs and precise scores."
+    },
+    "/settings/{settingId}": {
+      "schema": "GlobalSettings",
+      "description": "Global settings for key metrics."
     }
   }
 }

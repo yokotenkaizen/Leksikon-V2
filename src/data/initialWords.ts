@@ -4,6 +4,7 @@ export interface WordEntry {
   etymology?: string;
   definition: string;
   examples: string[];
+  searchCount?: number;
 }
 
 export const initialWords: WordEntry[] = [
