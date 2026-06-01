@@ -11,6 +11,7 @@ import {
   db, collection, doc, setDoc, getDoc, getDocs, deleteDoc, query, limit, onSnapshot, increment,
   OperationType, handleFirestoreError 
 } from './lib/firebase.ts';
+import { PustakaDigital } from './components/PustakaDigital.tsx';
 
 // Simple Error Boundary
 interface ErrorBoundaryProps {
@@ -72,6 +73,13 @@ interface CheckedWord {
   suggestions?: string[];
 }
 
+interface BypassEmail {
+  id: string;
+  email: string;
+  isActive: boolean;
+  createdAt: string;
+}
+
 function MainApp() {
   const [searchQuery, setSearchQuery] = useState('');
   const [isAdmin, setIsAdmin] = useState(false);
@@ -93,7 +101,7 @@ function MainApp() {
   const [statusType, setStatusType] = useState<'info' | 'error' | 'success'>('info');
 
   // Tab navigation state
-  const [activeTab, setActiveTab] = useState<'kamus' | 'pemeriksa'>('kamus');
+  const [activeTab, setActiveTab] = useState<'kamus' | 'pemeriksa' | 'pustaka'>('kamus');
 
   // Pemeriksa Typo State variables
   const [typoText, setTypoText] = useState('');
@@ -108,9 +116,10 @@ function MainApp() {
   const [tempEmailInput, setTempEmailInput] = useState<string>('');
   const [emailInputError, setEmailInputError] = useState<string>('');
   const [currentUserData, setCurrentUserData] = useState<any>(null);
-  const [paymentSettings, setPaymentSettings] = useState<{ gopayNumber: string; qrisImageUrl: string }>({
+  const [paymentSettings, setPaymentSettings] = useState<{ gopayNumber: string; qrisImageUrl: string; amount: number }>({
     gopayNumber: '081234567890',
-    qrisImageUrl: 'https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=gopay://payment?to=081234567890'
+    qrisImageUrl: 'https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=gopay://payment?to=081234567890',
+    amount: 5000
   });
   const [showPaymentModal, setShowPaymentModal] = useState<boolean>(false);
   const [isSubmittingPayment, setIsSubmittingPayment] = useState<boolean>(false);
@@ -118,11 +127,24 @@ function MainApp() {
   const [allEvaluations, setAllEvaluations] = useState<any[]>([]);
   const [payStatus, setPayStatus] = useState<string>('');
   const [payUsageCount, setPayUsageCount] = useState<number>(0);
+  const [allowedLimit, setAllowedLimit] = useState<number>(10);
   const [gopayInput, setGopayInput] = useState<string>('');
   const [qrisImageInput, setQrisImageInput] = useState<string>('');
+  const [amountInput, setAmountInput] = useState<number>(5000);
   const [qrisOption, setQrisOption] = useState<'url' | 'upload'>('url');
-  const [selectedAdminSubTab, setSelectedAdminSubTab] = useState<'rekap_bayar' | 'riwayat_eval' | 'pengaturan_bayar'>('rekap_bayar');
+  const [selectedAdminSubTab, setSelectedAdminSubTab] = useState<'rekap_bayar' | 'riwayat_eval' | 'pengaturan_bayar' | 'bypass_emails'>('rekap_bayar');
   const [adminTypoMode, setAdminTypoMode] = useState<'checker' | 'admin'>('checker');
+
+  // Bypass whitelist emails state
+  const [bypassEmailsList, setBypassEmailsList] = useState<BypassEmail[]>([]);
+  const [newBypassEmail, setNewBypassEmail] = useState('');
+
+  const isEmailBypassActive = (email: string) => {
+    if (!email) return false;
+    const emailKey = email.toLowerCase().trim();
+    const match = bypassEmailsList.find(b => b.id === emailKey);
+    return match ? match.isActive : false;
+  };
 
   const showStatus = (msg: string, type: 'info' | 'error' | 'success' = 'info', duration = 5000) => {
     setStatusMessage(msg);
@@ -154,6 +176,15 @@ function MainApp() {
     return tmp[a.length][b.length];
   };
 
+  const formatRupiah = (val: number) => {
+    return new Intl.NumberFormat('id-ID', {
+      style: 'currency',
+      currency: 'IDR',
+      minimumFractionDigits: 0,
+      maximumFractionDigits: 0
+    }).format(val);
+  };
+
   // Load global configurations (GoPay & QRIS)
   useEffect(() => {
     if (!db) return;
@@ -163,7 +194,8 @@ function MainApp() {
         const data = snapshot.data();
         setPaymentSettings({
           gopayNumber: data.gopayNumber || '081234567890',
-          qrisImageUrl: data.qrisImageUrl || 'https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=gopay://payment?to=081234567890'
+          qrisImageUrl: data.qrisImageUrl || 'https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=gopay://payment?to=081234567890',
+          amount: typeof data.amount === 'number' ? data.amount : 5000
         });
       }
     }, (err) => {
@@ -172,20 +204,74 @@ function MainApp() {
     return () => unsubscribe();
   }, [db]);
 
+  // Load bypass whitelist emails with live listener and offline local state initialization
+  useEffect(() => {
+    let unsub = () => {};
+    const defaultBypasses: BypassEmail[] = [
+      { id: 'admin1@gmail.com', email: 'Admin1@gmail.com', isActive: true, createdAt: new Date().toISOString() },
+      { id: 'admin2@gmail.com', email: 'Admin2@gmail.com', isActive: true, createdAt: new Date().toISOString() },
+      { id: 'user1@gmail.com', email: 'User1@gmail.com', isActive: true, createdAt: new Date().toISOString() },
+      { id: 'user2@gmail.com', email: 'User2@gmail.com', isActive: true, createdAt: new Date().toISOString() },
+    ];
+
+    const loadLocalBypass = () => {
+      const local = localStorage.getItem('typo_bypass_emails');
+      if (local) {
+        setBypassEmailsList(JSON.parse(local));
+      } else {
+        setBypassEmailsList(defaultBypasses);
+        localStorage.setItem('typo_bypass_emails', JSON.stringify(defaultBypasses));
+      }
+    };
+
+    if (db) {
+      try {
+        unsub = onSnapshot(collection(db, 'bypass_emails'), (snapshot) => {
+          if (!snapshot.empty) {
+            const list: BypassEmail[] = [];
+            snapshot.forEach((doc) => {
+              list.push({ id: doc.id, ...doc.data() } as BypassEmail);
+            });
+            setBypassEmailsList(list);
+            localStorage.setItem('typo_bypass_emails', JSON.stringify(list));
+          } else {
+            // Seed defaults to Firestore
+            defaultBypasses.forEach(async (b) => {
+              await setDoc(doc(db, 'bypass_emails', b.id), b);
+            });
+            setBypassEmailsList(defaultBypasses);
+            localStorage.setItem('typo_bypass_emails', JSON.stringify(defaultBypasses));
+          }
+        }, (err) => {
+          console.warn("Firestore bypass_emails error, using fallback:", err);
+          loadLocalBypass();
+        });
+      } catch (err) {
+        console.warn("Bypass emails subscription failed:", err);
+        loadLocalBypass();
+      }
+    } else {
+      loadLocalBypass();
+    }
+
+    return () => unsub();
+  }, [db]);
+
   // Load current typo user's profile
   useEffect(() => {
     if (!db || !typoEmail) {
       setCurrentUserData(null);
       setPayStatus('');
       setPayUsageCount(0);
+      setAllowedLimit(10);
       return;
     }
     const emailKey = typoEmail.toLowerCase().trim();
-    const bypassEmails = ['admin1@gmail.com', 'admin2@gmail.com', 'user1@gmail.com', 'user2@gmail.com'];
-    if (bypassEmails.includes(emailKey)) {
+    if (isEmailBypassActive(emailKey)) {
       setPayStatus('approved');
       setPayUsageCount(0);
-      setCurrentUserData({ email: emailKey, usageCount: 0, paymentStatus: 'approved' });
+      setAllowedLimit(999999);
+      setCurrentUserData({ email: emailKey, usageCount: 0, paymentStatus: 'approved', allowedLimit: 999999 });
       return;
     }
 
@@ -196,18 +282,24 @@ function MainApp() {
         setCurrentUserData(uData);
         setPayStatus(uData.paymentStatus || 'none');
         setPayUsageCount(uData.usageCount || 0);
+        // Automatic migration logic for legacy approved users:
+        const legacyLimit = uData.paymentStatus === 'approved' && !uData.allowedLimit 
+          ? Math.max(20, (uData.usageCount || 0) + 10) 
+          : 10;
+        setAllowedLimit(uData.allowedLimit || legacyLimit);
       } else {
-        const initUser = { email: emailKey, usageCount: 0, paymentStatus: 'none' };
+        const initUser = { email: emailKey, usageCount: 0, allowedLimit: 10, paymentStatus: 'none' };
         setDoc(docRef, initUser).catch(e => console.warn("Failed to create users record:", e));
         setCurrentUserData(initUser);
         setPayStatus('none');
         setPayUsageCount(0);
+        setAllowedLimit(10);
       }
     }, (err) => {
       console.warn("User listener error:", err);
     });
     return () => unsubscribe();
-  }, [db, typoEmail]);
+  }, [db, typoEmail, bypassEmailsList]);
 
   // Read payments & evaluations (Admin only)
   useEffect(() => {
@@ -216,7 +308,8 @@ function MainApp() {
       setAllEvaluations([]);
       return;
     }
-    const qPay = collection(db, 'payments');
+    // High-scalability: limit payments listener to top 200 items to prevent Firestore pricing/memory blow up
+    const qPay = query(collection(db, 'payments'), limit(200));
     const unsubscribePay = onSnapshot(qPay, (snapshot) => {
       const payList: any[] = [];
       snapshot.forEach((doc) => {
@@ -228,7 +321,8 @@ function MainApp() {
       console.warn("Payment log listener error:", err);
     });
 
-    const qEval = collection(db, 'evaluations');
+    // High-scalability: limit evaluations to top 300 items to optimize read counts
+    const qEval = query(collection(db, 'evaluations'), limit(300));
     const unsubscribeEval = onSnapshot(qEval, (snapshot) => {
       const evalList: any[] = [];
       snapshot.forEach((doc) => {
@@ -250,6 +344,7 @@ function MainApp() {
   useEffect(() => {
     setGopayInput(paymentSettings.gopayNumber);
     setQrisImageInput(paymentSettings.qrisImageUrl);
+    setAmountInput(paymentSettings.amount || 5000);
     if (paymentSettings.qrisImageUrl && paymentSettings.qrisImageUrl.startsWith('data:')) {
       setQrisOption('upload');
     } else {
@@ -318,16 +413,30 @@ function MainApp() {
     if (!db) return;
     try {
       setIsProcessing(true);
+      
+      const userRef = doc(db, 'users', emailStr.toLowerCase().trim());
+      const userSnap = await getDoc(userRef);
+      let newLimit = 20; // default (10 free + 10 paid)
+      
+      if (userSnap.exists()) {
+        const uData = userSnap.data();
+        const baseLimit = uData.allowedLimit || (uData.paymentStatus === 'approved' ? Math.max(20, (uData.usageCount || 0) + 10) : 10);
+        newLimit = baseLimit + 10;
+      }
+
+      // 1. Mark the payment log request as approved
       await setDoc(doc(db, 'payments', payId), {
         status: 'approved',
         approvedAt: new Date().toISOString()
       }, { merge: true });
 
-      await setDoc(doc(db, 'users', emailStr.toLowerCase().trim()), {
-        paymentStatus: 'approved'
+      // 2. Clear block status to 'none' and increase limit by 10 so they can pay again on next lock!
+      await setDoc(userRef, {
+        paymentStatus: 'none',
+        allowedLimit: newLimit
       }, { merge: true });
 
-      showStatus(`Pembayaran untuk ${emailStr} disetujui!`, "success");
+      showStatus(`Pembayaran untuk ${emailStr} disetujui! Jumlah batas ditambah 10 pemeriksaan baru.`, "success");
     } catch (e) {
       console.error(e);
       showStatus("Gagal memproses persetujuan.", "error");
@@ -371,16 +480,104 @@ function MainApp() {
       showStatus("Nomor GoPay tidak boleh kosong.", "error");
       return;
     }
+    if (amountInput <= 0) {
+      showStatus("Nominal pembayaran harus lebih besar dari Rp. 0.", "error");
+      return;
+    }
     try {
       setIsProcessing(true);
       await setDoc(doc(db, 'settings', 'global'), {
         gopayNumber: gopayInput.trim(),
-        qrisImageUrl: qrisImageInput.trim()
+        qrisImageUrl: qrisImageInput.trim(),
+        amount: Number(amountInput)
       }, { merge: true });
-      showStatus("Penggantian detail GoPay & QRIS disimpan!", "success");
+      showStatus("Penggantian detail GoPay, QRIS & Nominal Pembayaran disimpan!", "success");
     } catch (e) {
       console.error(e);
       showStatus("Gagal menyimpan.", "error");
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  const handleAddBypassEmail = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const emailKey = newBypassEmail.toLowerCase().trim();
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailKey || !emailRegex.test(emailKey)) {
+      showStatus("Harap masukkan format email yang valid.", "error");
+      return;
+    }
+
+    if (bypassEmailsList.some(b => b.id === emailKey)) {
+      showStatus("Email sudah terdaftar dalam daftar bypass.", "error");
+      return;
+    }
+
+    const newItem: BypassEmail = {
+      id: emailKey,
+      email: newBypassEmail.trim(),
+      isActive: true,
+      createdAt: new Date().toISOString()
+    };
+
+    try {
+      setIsProcessing(true);
+      if (db) {
+        await setDoc(doc(db, 'bypass_emails', emailKey), newItem);
+      } else {
+        const updated = [...bypassEmailsList, newItem];
+        setBypassEmailsList(updated);
+        localStorage.setItem('typo_bypass_emails', JSON.stringify(updated));
+      }
+      setNewBypassEmail('');
+      showStatus(`Email ${newItem.email} berhasil ditambahkan ke whitelist bypass!`, "success");
+    } catch (err: any) {
+      console.warn("Gagal menambahkan email bypass:", err);
+      showStatus("Gagal menambahkan email bypass ke Firestore.", "error");
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  const handleToggleBypassEmail = async (id: string, currentStatus: boolean) => {
+    try {
+      setIsProcessing(true);
+      if (db) {
+        await setDoc(doc(db, 'bypass_emails', id), {
+          isActive: !currentStatus
+        }, { merge: true });
+      } else {
+        const updated = bypassEmailsList.map(b => b.id === id ? { ...b, isActive: !currentStatus } : b);
+        setBypassEmailsList(updated);
+        localStorage.setItem('typo_bypass_emails', JSON.stringify(updated));
+      }
+      showStatus(`Status bypass berhasil diubah menjadi ${!currentStatus ? 'AKTIF' : 'NON-AKTIF'}.`, "success");
+    } catch (err) {
+      console.warn("Gagal mengubah status bypass:", err);
+      showStatus("Gagal mengubah status bypass di Firestore.", "error");
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  const handleDeleteBypassEmail = async (id: string, emailStr: string) => {
+    if (!window.confirm(`Apakah Anda yakin ingin menghapus email ${emailStr} dari whitelist bypass?`)) {
+      return;
+    }
+    try {
+      setIsProcessing(true);
+      if (db) {
+        await deleteDoc(doc(db, 'bypass_emails', id));
+      } else {
+        const updated = bypassEmailsList.filter(b => b.id !== id);
+        setBypassEmailsList(updated);
+        localStorage.setItem('typo_bypass_emails', JSON.stringify(updated));
+      }
+      showStatus(`Email ${emailStr} berhasil dihapus dari whitelist bypass.`, "success");
+    } catch (err) {
+      console.warn("Gagal menghapus email bypass:", err);
+      showStatus("Gagal menghapus email bypass dari Firestore.", "error");
     } finally {
       setIsProcessing(false);
     }
@@ -440,8 +637,7 @@ function MainApp() {
       setTypoEmail(emailKey);
     }
 
-    const bypassEmails = ['admin1@gmail.com', 'admin2@gmail.com', 'user1@gmail.com', 'user2@gmail.com'];
-    if (bypassEmails.includes(emailKey)) {
+    if (isEmailBypassActive(emailKey)) {
       runStandardCheckAndSave(rawText, emailKey, true);
       return;
     }
@@ -453,25 +649,32 @@ function MainApp() {
 
     setIsAnalyzing(true);
     try {
-      const userDocRef = doc(db, 'users', emailKey);
-      const userSnap = await getDoc(userDocRef);
-      
-      let usageCount = 0;
-      let paymentStatus = 'none';
+      // High-scalability optimization: check synchronized states in local memory first.
+      // This saves a Firestore document read request on every single check submission!
+      let usageCount = payUsageCount;
+      let paymentStatus = payStatus;
+      let uLimit = allowedLimit;
 
-      if (userSnap.exists()) {
-        const uData = userSnap.data();
-        usageCount = uData.usageCount || 0;
-        paymentStatus = uData.paymentStatus || 'none';
-      } else {
-        const initUser = { email: emailKey, usageCount: 0, paymentStatus: 'none' };
-        await setDoc(userDocRef, initUser);
+      if (!currentUserData) {
+        // Fallback for initial boot or cache reset
+        const userDocRef = doc(db, 'users', emailKey);
+        const userSnap = await getDoc(userDocRef);
+        if (userSnap.exists()) {
+          const uData = userSnap.data();
+          usageCount = uData.usageCount || 0;
+          paymentStatus = uData.paymentStatus || 'none';
+          uLimit = uData.allowedLimit || (uData.paymentStatus === 'approved' ? Math.max(20, usageCount + 10) : 10);
+        } else {
+          const initUser = { email: emailKey, usageCount: 0, allowedLimit: 10, paymentStatus: 'none' };
+          await setDoc(userDocRef, initUser);
+          usageCount = 0;
+          paymentStatus = 'none';
+          uLimit = 10;
+        }
       }
 
-      if (usageCount >= 10) {
-        if (paymentStatus === 'approved') {
-          runStandardCheckAndSave(rawText, emailKey, false);
-        } else if (paymentStatus === 'pending') {
+      if (usageCount >= uLimit) {
+        if (paymentStatus === 'pending') {
           setIsAnalyzing(false);
           setShowPaymentModal(true);
           showStatus("Pembayaran Anda sedang menunggu persetujuan Admin.", "info");
@@ -583,7 +786,8 @@ function MainApp() {
         const userDocRef = doc(db, 'users', emailStr);
         await setDoc(userDocRef, {
           email: emailStr,
-          usageCount: increment(1)
+          usageCount: increment(1),
+          allowedLimit: allowedLimit
         }, { merge: true });
       }
       showStatus("Pemeriksaan selesai, log tersimpan di cloud!", "success");
@@ -1567,11 +1771,22 @@ function MainApp() {
               : 'border-transparent text-gray-400 hover:text-[#1a1a1a]'
           }`}
         >
-          Pemeriksa Typo (KBBI) <span className="bg-amber-100 text-amber-800 px-2 py-0.5 rounded-full text-[9px] font-sans font-black uppercase">Fitur Baru</span>
+          Pemeriksa Typo (KBBI)
+        </button>
+        <button
+          id="tab-pustaka"
+          onClick={() => { setActiveTab('pustaka'); }}
+          className={`pb-4 text-xs font-sans font-bold uppercase tracking-widest border-b-2 transition-all flex items-center gap-2 ${
+            activeTab === 'pustaka'
+              ? 'border-[#1a1a1a] text-[#1a1a1a]'
+              : 'border-transparent text-gray-400 hover:text-[#1a1a1a]'
+          }`}
+        >
+          Pustaka Digital <span className="bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-full text-[9px] font-sans font-black uppercase">Gres</span>
         </button>
       </div>
 
-      {activeTab === 'kamus' ? (
+      {activeTab === 'kamus' && (
         <main className="max-w-6xl mx-auto px-6 grid grid-cols-1 md:grid-cols-12 gap-8 md:gap-12">
         {/* Left Column: Search & Admin Actions */}
         <div className="md:col-span-4 space-y-12">
@@ -2040,7 +2255,9 @@ function MainApp() {
           </React.Fragment>
         </div>
       </main>
-      ) : (
+      )}
+
+      {activeTab === 'pemeriksa' && (
         <main className="max-w-6xl mx-auto px-6 space-y-6">
           {isAdmin && (
             <div className="bg-amber-50 border border-amber-200/60 p-3 rounded-sm flex flex-col sm:flex-row items-baseline sm:items-center justify-between gap-4">
@@ -2092,6 +2309,12 @@ function MainApp() {
                     className={`px-4 py-2 text-[10px] uppercase font-sans font-bold tracking-wider transition-all rounded-sm ${selectedAdminSubTab === 'pengaturan_bayar' ? 'bg-[#1a1a1a] text-white shadow-md' : 'text-gray-500 hover:text-[#1a1a1a]'}`}
                   >
                     Pengaturan Saluran
+                  </button>
+                  <button
+                    onClick={() => setSelectedAdminSubTab('bypass_emails')}
+                    className={`px-4 py-2 text-[10px] uppercase font-sans font-bold tracking-wider transition-all rounded-sm ${selectedAdminSubTab === 'bypass_emails' ? 'bg-[#1a1a1a] text-white shadow-md' : 'text-gray-500 hover:text-[#1a1a1a]'}`}
+                  >
+                    Bypass Typo (Whitelist)
                   </button>
                 </div>
               </div>
@@ -2242,6 +2465,18 @@ function MainApp() {
                       />
                     </div>
 
+                    <div className="space-y-2">
+                      <label className="block text-[9px] font-sans font-bold uppercase tracking-widest text-[#1a1a1a] opacity-55 font-sans">Nominal Pembayaran (Rp)</label>
+                      <input
+                        type="number"
+                        value={amountInput}
+                        onChange={(e) => setAmountInput(Math.max(0, parseInt(e.target.value) || 0))}
+                        placeholder="Contoh: 5000"
+                        className="w-full text-base font-mono border-b border-gray-200 focus:border-[#1a1a1a] focus:outline-none py-2 bg-transparent text-gray-800"
+                      />
+                      <p className="text-[10px] text-gray-400 font-serif italic">Nominal yang dikenakan per 10 kali penggunaan fitur typo check.</p>
+                    </div>
+
                     <div className="space-y-4">
                       <label className="block text-[9px] font-sans font-bold uppercase tracking-widest text-[#1a1a1a] opacity-55 font-sans">Opsi Model Gambar QRIS</label>
                       <div className="flex border border-gray-200 p-0.5 rounded-sm bg-gray-50/50">
@@ -2333,6 +2568,104 @@ function MainApp() {
                         <Settings size={12} /> Simpan Pengaturan Saluran
                       </button>
                     </div>
+                  </div>
+                </div>
+              )}
+
+              {/* BYPASS TYPO (WHITELIST) */}
+              {selectedAdminSubTab === 'bypass_emails' && (
+                <div className="space-y-6 animate-in fade-in duration-300">
+                  <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 border-b border-gray-100 pb-4">
+                    <div>
+                      <h3 className="text-xs font-sans font-black uppercase tracking-widest text-[#1a1a1a]">Manajemen Bypass Pemeriksa Typo</h3>
+                      <p className="text-[11px] text-gray-400 font-serif mt-1">Daftar email yang diperbolehkan bypass limit pemeriksaan typo KBBI (berkali-kali gratis). Anda dapat mengaktifkan/menonaktifkan atau menambah email bypass baru di bawah ini.</p>
+                    </div>
+                  </div>
+
+                  {/* Add New Email Form */}
+                  <form onSubmit={handleAddBypassEmail} className="bg-gray-50 border border-gray-200 p-4 rounded-sm space-y-3 max-w-xl">
+                    <span className="text-[9px] font-sans font-extrabold uppercase tracking-widest text-gray-600 block">Tambah Email Baru (Akses Bypass)</span>
+                    <div className="flex flex-col sm:flex-row gap-3">
+                      <div className="relative flex-1">
+                        <input
+                          type="email"
+                          required
+                          value={newBypassEmail}
+                          onChange={(e) => setNewBypassEmail(e.target.value)}
+                          placeholder="Masukkan email, misal: pengguna@gmail.com"
+                          className="w-full text-xs border border-gray-200 focus:border-[#1a1a1a] focus:outline-none px-3 py-2 bg-white text-gray-800 rounded-sm font-mono"
+                        />
+                      </div>
+                      <button
+                        type="submit"
+                        className="px-4 py-2 bg-[#1a1a1a] hover:bg-gray-800 text-white rounded-sm text-[10px] uppercase font-sans font-black tracking-widest transition-all shrink-0 flex items-center justify-center gap-1"
+                      >
+                        <Plus size={12} /> Tambah Email
+                      </button>
+                    </div>
+                  </form>
+
+                  {/* Display list in a table */}
+                  <div className="overflow-x-auto border border-gray-200 rounded-sm font-sans max-w-4xl">
+                    <table className="w-full text-left font-sans text-xs">
+                      <thead>
+                        <tr className="bg-gray-50 border-b border-gray-200 text-gray-500 uppercase tracking-widest text-[9px] font-black">
+                          <th className="px-6 py-4">Alamat Email</th>
+                          <th className="px-6 py-4 text-center">Status Bypass</th>
+                          <th className="px-6 py-4">Tanggal Ditambahkan</th>
+                          <th className="px-6 py-4 text-right">Tindakan</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-150">
+                        {bypassEmailsList.length === 0 ? (
+                          <tr>
+                            <td colSpan={4} className="px-6 py-12 text-center text-gray-400 font-serif italic text-sm">
+                              Tidak ada email bypass terdaftar.
+                            </td>
+                          </tr>
+                        ) : (
+                          bypassEmailsList.map((entry, idx) => (
+                            <tr key={entry.id || idx} className="hover:bg-gray-50/50 transition-colors">
+                              <td className="px-6 py-4 font-mono font-bold text-gray-750">{entry.email}</td>
+                              <td className="px-6 py-4 text-center">
+                                <button
+                                  type="button"
+                                  onClick={() => handleToggleBypassEmail(entry.id, entry.isActive)}
+                                  className={`inline-flex items-center gap-1 px-3 py-1 rounded-full text-[9px] font-black uppercase tracking-widest transition-all ${
+                                    entry.isActive
+                                      ? 'bg-green-50 text-green-805 border border-green-200 hover:bg-green-100'
+                                      : 'bg-red-50 text-red-850 border border-red-200 hover:bg-red-100'
+                                  }`}
+                                  title="Klik untuk mengubah status aktif"
+                                >
+                                  {entry.isActive ? (
+                                    <>
+                                      <CheckCircle size={10} /> Aktif (Bypass)
+                                    </>
+                                  ) : (
+                                    <>
+                                      <X size={10} /> Non-aktif (Dibatasi)
+                                    </>
+                                  )}
+                                </button>
+                              </td>
+                              <td className="px-6 py-4 text-gray-400 font-mono text-[11px]">
+                                {entry.createdAt ? new Date(entry.createdAt).toLocaleString("id-ID") : "-"}
+                              </td>
+                              <td className="px-6 py-4 text-right">
+                                <button
+                                  type="button"
+                                  onClick={() => handleDeleteBypassEmail(entry.id, entry.email)}
+                                  className="text-[10px] uppercase font-black font-sans tracking-wide text-red-650 hover:text-red-700 hover:underline px-2 py-1"
+                                >
+                                  Hapus
+                                </button>
+                              </td>
+                            </tr>
+                          ))
+                        )}
+                      </tbody>
+                    </table>
                   </div>
                 </div>
               )}
@@ -2592,7 +2925,21 @@ function MainApp() {
                 )}
               </div>
             </div>
-          </div> )}
+          </div>
+          )
+        }
+        </main>
+      )}
+
+      {activeTab === 'pustaka' && (
+        <main className="max-w-6xl mx-auto px-6">
+          <PustakaDigital 
+            isAdmin={isAdmin}
+            userEmail={typoEmail}
+            paymentSettings={paymentSettings}
+            showStatus={showStatus}
+            formatRupiah={formatRupiah}
+          />
         </main>
       )}
 
@@ -2752,7 +3099,7 @@ function MainApp() {
             ) : (
               <div className="space-y-6">
                 <p className="text-xs text-gray-500 font-serif leading-relaxed">
-                  Batas penggunaan gratis maksimum 10x untuk email terdaftar (<span className="font-mono italic font-bold text-gray-800">{typoEmail}</span>) telah terlapaui. Silakan lakukan pembayaran satu kali (pay-per-use) sebesar <strong>Rp. 5.000,00</strong> ke GOPAY atau QRIS di bawah ini untuk mengaktifkan akses kembali.
+                  Batas penggunaan Anda ({allowedLimit}x pemeriksaan) untuk email terdaftar (<span className="font-mono italic font-bold text-gray-800">{typoEmail}</span>) telah terlampaui. Silakan lakukan pembayaran sebesar <strong>{formatRupiah(paymentSettings.amount || 5000)}</strong> ke GOPAY atau QRIS di bawah ini untuk membuka akses tambahan <strong>10x pemeriksaan berikutnya</strong>.
                 </p>
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6 bg-amber-50/40 p-4 border border-amber-100 rounded-sm">

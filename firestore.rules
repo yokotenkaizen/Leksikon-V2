@@ -88,6 +88,35 @@ service cloud.firestore {
         && data.gopayNumber is string && data.gopayNumber.size() <= 50;
     }
 
+    function isValidBypassEmail(data) {
+      return data.keys().hasAll(['email', 'isActive'])
+        && data.keys().size() <= 5
+        && data.email is string && data.email.size() <= 128
+        && data.isActive is bool;
+    }
+
+    function isValidLibraryProduct(data) {
+      return data.keys().hasAll(['title', 'description', 'format', 'price', 'contentUrl'])
+        && data.keys().size() <= 9
+        && data.title is string && data.title.size() <= 200
+        && data.description is string && data.description.size() <= 2000
+        && data.format is string && data.format.size() <= 10
+        && data.price is int
+        && data.contentUrl is string && data.contentUrl.size() <= 1050000;
+    }
+
+    function isValidLibraryPayment(data) {
+      return data.keys().hasAll(['customerName', 'customerPhone', 'customerEmail', 'productId', 'amount', 'status', 'requestedAt'])
+        && data.keys().size() <= 11
+        && data.customerName is string && data.customerName.size() <= 128
+        && data.customerPhone is string && data.customerPhone.size() <= 50
+        && data.customerEmail is string && data.customerEmail.size() <= 128
+        && data.productId is string && data.productId.size() <= 128
+        && data.amount is int
+        && data.status is string && data.status.size() <= 50
+        && data.requestedAt is string;
+    }
+
     // --- PHASE 4: Match collections ---
 
     // Words collection
@@ -140,6 +169,27 @@ service cloud.firestore {
     match /settings/{settingId} {
       allow read: if true;
       allow write: if true;
+    }
+
+    // Bypass Whitelist Emails
+    match /bypass_emails/{id} {
+      allow read: if true;
+      allow create, update: if isValidId(id) && isValidBypassEmail(incoming());
+      allow delete: if true;
+    }
+
+    // Library Products
+    match /library_products/{productId} {
+      allow read: if true;
+      allow create, update: if isValidId(productId) && isValidLibraryProduct(incoming());
+      allow delete: if true;
+    }
+
+    // Library Payments
+    match /library_payments/{paymentId} {
+      allow read: if true;
+      allow create, update: if isValidId(paymentId) && isValidLibraryPayment(incoming());
+      allow delete: if true;
     }
   }
 }

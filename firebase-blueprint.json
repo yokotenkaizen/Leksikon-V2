@@ -76,6 +76,52 @@
         "qrisImageUrl": { "type": "string", "description": "Direct image URL for QRIS QR" }
       },
       "required": ["gopayNumber"]
+    },
+    "BypassEmail": {
+      "title": "Bypass Whitelist Email",
+      "description": "List of user emails that can bypass the premium payment limit for typo checking.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "email": { "type": "string" },
+        "isActive": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["email", "isActive"]
+    },
+    "LibraryProduct": {
+      "title": "Digital Product",
+      "description": "A digital product available in the digital library (Pustaka Digital).",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "title": { "type": "string" },
+        "description": { "type": "string" },
+        "format": { "type": "string", "enum": ["doc", "pdf", "image", "link"] },
+        "price": { "type": "integer" },
+        "contentUrl": { "type": "string" },
+        "theme": { "type": "string", "enum": ["slate", "indigo", "emerald", "amber", "rose"] },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["title", "description", "format", "price", "contentUrl"]
+    },
+    "LibraryPayment": {
+      "title": "Library Product Payment",
+      "description": "Payment transactions for buying premium products from Pustaka Digital.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "customerName": { "type": "string" },
+        "customerPhone": { "type": "string" },
+        "customerEmail": { "type": "string" },
+        "productId": { "type": "string" },
+        "productTitle": { "type": "string" },
+        "amount": { "type": "integer" },
+        "status": { "type": "string", "enum": ["pending", "approved"] },
+        "requestedAt": { "type": "string", "format": "date-time" },
+        "approvedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["customerName", "customerPhone", "customerEmail", "productId", "amount", "status", "requestedAt"]
     }
   },
   "firestore": {
@@ -102,6 +148,18 @@
     "/settings/{settingId}": {
       "schema": "GlobalSettings",
       "description": "Global settings for key metrics."
+    },
+    "/bypass_emails/{id}": {
+      "schema": "BypassEmail",
+      "description": "White-listed emails for bypassing premium checks."
+    },
+    "/library_products/{productId}": {
+      "schema": "LibraryProduct",
+      "description": "Digital products inside Pustaka Digital database."
+    },
+    "/library_payments/{paymentId}": {
+      "schema": "LibraryPayment",
+      "description": "Sales transactions of library products."
     }
   }
 }
