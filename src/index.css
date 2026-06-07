@@ -5,3 +5,108 @@
   --font-serif: "Playfair Display", serif;
   --font-sans: "Inter", sans-serif;
 }
+
+/* Custom dark mode system overrides for dynamic twilight reading theme */
+
+.dark body, .dark html {
+  background-color: #131211 !important;
+  color: #f4efe8 !important;
+  transition: background-color 0.3s ease, color 0.3s ease;
+}
+
+.dark .bg-white {
+  background-color: #1e1c1a !important;
+  color: #f4efe8 !important;
+}
+
+.dark .text-\[\#1a1a1a\] {
+  color: #f4efe8 !important;
+}
+
+.dark .border-gray-200,
+.dark .border-gray-150,
+.dark .border-gray-100 {
+  border-color: rgba(244, 239, 232, 0.12) !important;
+}
+
+.dark .border-\[\#1a1a1a\]\/10 {
+  border-color: rgba(244, 239, 232, 0.08) !important;
+}
+
+.dark .border-\[\#1a1a1a\] {
+  border-color: #f4efe8 !important;
+}
+
+.dark .bg-gray-50,
+.dark .bg-gray-50\/50,
+.dark .bg-gray-100 {
+  background-color: #272421 !important;
+}
+
+.dark .shadow-\[10px_10px_0px_\#e5e2da\],
+.dark .shadow-\[15px_15px_0px_\#e5e2da\],
+.dark .shadow-\[20px_20px_0px_\#e5e2da\] {
+  box-shadow: 10px 10px 0px #2a2724 !important;
+}
+
+.dark .shadow-\[10px_10px_0px_\#f5f5f5\] {
+  box-shadow: 10px 10px 0px #1a1816 !important;
+}
+
+.dark .text-gray-500,
+.dark .text-gray-400 {
+  color: #8c837a !important;
+}
+
+.dark .text-gray-800,
+.dark .text-gray-700,
+.dark .text-gray-600 {
+  color: #e0d7ce !important;
+}
+
+.dark .bg-\[\#fdfbf7\]\/50 {
+  background-color: rgba(30, 28, 26, 0.5) !important;
+}
+
+.dark input,
+.dark textarea,
+.dark select {
+  background-color: #272421 !important;
+  color: #f4efe8 !important;
+  border-color: rgba(244, 239, 232, 0.2) !important;
+}
+
+.dark input::placeholder,
+.dark textarea::placeholder {
+  color: #7c746b !important;
+}
+
+/* Modals & Popups shadow */
+.dark .shadow-2xl,
+.dark .shadow-xl {
+  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.6) !important;
+}
+
+/* Recharts elements styling in dark mode */
+.dark .recharts-cartesian-grid-horizontal line {
+  stroke: rgba(244, 239, 232, 0.1) !important;
+}
+
+.dark .recharts-text {
+  fill: #8c837a !important;
+}
+
+.dark .recharts-default-tooltip {
+  background-color: #1e1c1a !important;
+  border-color: rgba(244, 239, 232, 0.2) !important;
+}
+
+.dark .divide-gray-150 > :not([hidden]) ~ :not([hidden]) {
+  border-color: rgba(244, 239, 232, 0.12) !important;
+}
+
+.dark .hover\:bg-gray-50:hover,
+.dark .hover\:bg-gray-50\/55:hover,
+.dark .hover\:bg-\[\#fdfbf7\]\/50:hover {
+  background-color: rgba(244, 239, 232, 0.05) !important;
+}

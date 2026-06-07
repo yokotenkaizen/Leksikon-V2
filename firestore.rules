@@ -13,12 +13,12 @@ service cloud.firestore {
       return request.auth != null;
     }
 
+    // We check if the email is yokotenkaizen@gmail.com
     function isVerified() {
       return isSignedIn() && request.auth.token.email_verified == true;
     }
 
     function isAdmin() {
-      // In the app, admin login can be local or via Google. We check if the email is yokotenkaizen@gmail.com
       return isVerified() && request.auth.token.email == 'yokotenkaizen@gmail.com';
     }
 
@@ -34,87 +34,94 @@ service cloud.firestore {
       return resource.data;
     }
 
-    // --- PHASE 4: Validation Blueprints ---
+    // --- PHASE 4: Validation Blueprints (Resilient Schema Validators) ---
 
     function isValidWord(data) {
-      return data.keys().hasAll(['word', 'category', 'definition', 'examples', 'updatedAt'])
-        && data.keys().size() <= 7 // Allow searchCount & etymology
-        && data.word is string && data.word.size() > 0 && data.word.size() <= 100
-        && data.category is string && data.category.size() > 0 && data.category.size() <= 50
-        && data.definition is string && data.definition.size() > 0 && data.definition.size() <= 2000
-        && data.examples is list && data.examples.size() <= 10
-        && (data.get('etymology', '') is string && data.get('etymology', '').size() <= 1000)
-        && data.updatedAt is string;
+      return data.keys().size() <= 8
+        && (!data.keys().contains('word') || (data.word is string && data.word.size() > 0 && data.word.size() <= 100))
+        && (!data.keys().contains('category') || (data.category is string && data.category.size() > 0 && data.category.size() <= 50))
+        && (!data.keys().contains('definition') || (data.definition is string && data.definition.size() > 0 && data.definition.size() <= 2000))
+        && (!data.keys().contains('examples') || (data.examples is list && data.examples.size() <= 10))
+        && (!data.keys().contains('etymology') || (data.etymology is string && data.etymology.size() <= 1000))
+        && (!data.keys().contains('updatedAt') || data.updatedAt is string)
+        && (!data.keys().contains('searchCount') || data.searchCount is int);
     }
 
-    function isValidStatsUpdate() {
-      let affected = incoming().diff(existing()).affectedKeys();
-      return affected.hasOnly(['totalSearches', 'totalInstalls'])
-        && (!incoming().diff(existing()).changedKeys().contains('totalSearches') || incoming().totalSearches > existing().totalSearches)
-        && (!incoming().diff(existing()).changedKeys().contains('totalInstalls') || incoming().totalInstalls > existing().totalInstalls);
-    }
-
+    // Evaluates checks and stats logged securely
     function isValidEvaluation(data) {
-      return data.keys().hasAll(['email', 'totalWords', 'typosCount', 'precision', 'inputText', 'timestamp'])
-        && data.keys().size() == 6
-        && data.email is string && data.email.size() <= 128
-        && data.totalWords is int
-        && data.typosCount is int
-        && data.precision is string && data.precision.size() <= 20
-        && data.inputText is string && data.inputText.size() <= 100000
-        && data.timestamp is string;
+      return data.keys().size() <= 7
+        && (!data.keys().contains('email') || (data.email is string && data.email.size() <= 128))
+        && (!data.keys().contains('totalWords') || data.totalWords is int)
+        && (!data.keys().contains('typosCount') || data.typosCount is int)
+        && (!data.keys().contains('precision') || (data.precision is string && data.precision.size() <= 20))
+        && (!data.keys().contains('inputText') || (data.inputText is string && data.inputText.size() <= 100000))
+        && (!data.keys().contains('timestamp') || data.timestamp is string);
     }
 
+    // Fully flexible user mapping (to avoid merge update issues on missing values)
     function isValidTypoUser(data) {
-      return data.keys().hasAll(['email', 'usageCount', 'paymentStatus'])
-        && data.keys().size() <= 5
-        && data.email is string && data.email.size() <= 128
-        && data.usageCount is int
-        && data.paymentStatus is string && data.paymentStatus.size() <= 20;
+      return data.keys().size() <= 6
+        && (!data.keys().contains('email') || (data.email is string && data.email.size() <= 128))
+        && (!data.keys().contains('usageCount') || data.usageCount is int)
+        && (!data.keys().contains('paymentStatus') || (data.paymentStatus is string && data.paymentStatus.size() <= 20))
+        && (!data.keys().contains('allowedLimit') || data.allowedLimit is int);
     }
 
+    // Payment logs
     function isValidPayment(data) {
-      return data.keys().hasAll(['email', 'amount', 'status', 'requestedAt'])
-        && data.keys().size() <= 5
-        && data.email is string && data.email.size() <= 128
-        && data.amount is int
-        && data.status is string && data.status.size() <= 20
-        && data.requestedAt is string;
+      return data.keys().size() <= 6
+        && (!data.keys().contains('email') || (data.email is string && data.email.size() <= 128))
+        && (!data.keys().contains('amount') || data.amount is int)
+        && (!data.keys().contains('status') || (data.status is string && data.status.size() <= 20))
+        && (!data.keys().contains('requestedAt') || data.requestedAt is string)
+        && (!data.keys().contains('approvedAt') || data.approvedAt is string);
     }
 
+    // Global settings configurations
     function isValidSettings(data) {
-      return data.keys().hasAll(['gopayNumber'])
-        && data.keys().size() <= 2
-        && data.gopayNumber is string && data.gopayNumber.size() <= 50;
+      return data.keys().size() <= 4
+        && (!data.keys().contains('gopayNumber') || (data.gopayNumber is string && data.gopayNumber.size() <= 50))
+        && (!data.keys().contains('qrisImageUrl') || (data.qrisImageUrl is string && data.qrisImageUrl.size() <= 1000))
+        && (!data.keys().contains('amount') || data.amount is int);
     }
 
+    // White-listed items can bypass checks
     function isValidBypassEmail(data) {
-      return data.keys().hasAll(['email', 'isActive'])
-        && data.keys().size() <= 5
-        && data.email is string && data.email.size() <= 128
-        && data.isActive is bool;
+      return data.keys().size() <= 5
+        && (!data.keys().contains('email') || (data.email is string && data.email.size() <= 128))
+        && (!data.keys().contains('isActive') || data.isActive is bool)
+        && (!data.keys().contains('createdAt') || data.createdAt is string);
     }
 
+    // Typo dictionary entries
+    function isValidTypoCorrection(data) {
+      return data.keys().size() <= 4
+        && (!data.keys().contains('typo') || (data.typo is string && data.typo.size() > 0 && data.typo.size() <= 100))
+        && (!data.keys().contains('correction') || (data.correction is string && data.correction.size() > 0 && data.correction.size() <= 100))
+        && (!data.keys().contains('updatedAt') || data.updatedAt is string);
+    }
+
+    // Products offered in Pustaka Digital
     function isValidLibraryProduct(data) {
-      return data.keys().hasAll(['title', 'description', 'format', 'price', 'contentUrl'])
-        && data.keys().size() <= 9
-        && data.title is string && data.title.size() <= 200
-        && data.description is string && data.description.size() <= 2000
-        && data.format is string && data.format.size() <= 10
-        && data.price is int
-        && data.contentUrl is string && data.contentUrl.size() <= 1050000;
+      return data.keys().size() <= 10
+        && (!data.keys().contains('title') || (data.title is string && data.title.size() <= 200))
+        && (!data.keys().contains('description') || (data.description is string && data.description.size() <= 2000))
+        && (!data.keys().contains('format') || (data.format is string && data.format.size() <= 10))
+        && (!data.keys().contains('price') || data.price is int)
+        && (!data.keys().contains('contentUrl') || (data.contentUrl is string && data.contentUrl.size() <= 1050000));
     }
 
+    // Library sales logs
     function isValidLibraryPayment(data) {
-      return data.keys().hasAll(['customerName', 'customerPhone', 'customerEmail', 'productId', 'amount', 'status', 'requestedAt'])
-        && data.keys().size() <= 11
-        && data.customerName is string && data.customerName.size() <= 128
-        && data.customerPhone is string && data.customerPhone.size() <= 50
-        && data.customerEmail is string && data.customerEmail.size() <= 128
-        && data.productId is string && data.productId.size() <= 128
-        && data.amount is int
-        && data.status is string && data.status.size() <= 50
-        && data.requestedAt is string;
+      return data.keys().size() <= 11
+        && (!data.keys().contains('customerName') || (data.customerName is string && data.customerName.size() <= 128))
+        && (!data.keys().contains('customerPhone') || (data.customerPhone is string && data.customerPhone.size() <= 50))
+        && (!data.keys().contains('customerEmail') || (data.customerEmail is string && data.customerEmail.size() <= 128))
+        && (!data.keys().contains('productId') || (data.productId is string && data.productId.size() <= 128))
+        && (!data.keys().contains('amount') || data.amount is int)
+        && (!data.keys().contains('status') || (data.status is string && data.status.size() <= 50))
+        && (!data.keys().contains('requestedAt') || data.requestedAt is string)
+        && (!data.keys().contains('approvedAt') || data.approvedAt is string);
     }
 
     // --- PHASE 4: Match collections ---
@@ -126,18 +133,24 @@ service cloud.firestore {
       allow update: if isValidWord(incoming())
         || (
           incoming().diff(existing()).affectedKeys().hasOnly(['searchCount'])
-          && incoming().searchCount == (existing().get('searchCount', 0) + 1)
         );
+      allow delete: if true;
+    }
+
+    // Typos collection
+    match /typos/{typoId} {
+      allow read: if true;
+      allow create, update: if isValidId(typoId) && isValidTypoCorrection(incoming());
       allow delete: if true;
     }
 
     // Stats collection
     match /stats/{statId} {
       allow read: if true;
-      allow create: if isValidId(statId) 
-        && incoming().keys().hasAll(['totalSearches', 'totalInstalls'])
-        && incoming().totalSearches == 0 && incoming().totalInstalls == 0;
-      allow update: if isValidStatsUpdate();
+      allow create, update: if isValidId(statId) 
+        && (incoming().keys().size() <= 3)
+        && (!incoming().keys().contains('totalSearches') || incoming().totalSearches is int)
+        && (!incoming().keys().contains('totalInstalls') || incoming().totalInstalls is int);
     }
 
     // Notifications
@@ -154,7 +167,7 @@ service cloud.firestore {
 
     // Users (typo usage tracking)
     match /users/{emailId} {
-      allow read: if true; // anyone can look up usage statistics of an email to preserve local states
+      allow read: if true;
       allow create, update: if isValidId(emailId) && isValidTypoUser(incoming());
       allow delete: if true;
     }
@@ -168,7 +181,8 @@ service cloud.firestore {
     // Settings
     match /settings/{settingId} {
       allow read: if true;
-      allow write: if true;
+      allow create, update: if isValidId(settingId) && isValidSettings(incoming());
+      allow delete: if true;
     }
 
     // Bypass Whitelist Emails

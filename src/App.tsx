@@ -3,15 +3,160 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect, useRef, ErrorInfo, ReactNode } from 'react';
-import { Search, History, BookOpen, Trash2, ArrowRight, Plus, Edit2, X, Save, Settings, LogIn, LogOut, Upload, Download, Loader2, Bell, BellOff, Volume2, VolumeX, WifiOff, Cloud, FileText, Copy, RefreshCw, Check, AlertCircle, ShieldAlert, Clock, CreditCard, CheckCircle } from 'lucide-react';
+import React, { useState, useEffect, useRef, ErrorInfo, ReactNode, useMemo } from 'react';
+import { Search, History, BookOpen, Trash2, ArrowRight, Plus, Edit2, X, Save, Settings, LogIn, LogOut, Upload, Download, Loader2, Bell, BellOff, Volume2, VolumeX, WifiOff, Cloud, FileText, Copy, RefreshCw, Check, AlertCircle, ShieldAlert, Clock, CreditCard, CheckCircle, Sun, Moon } from 'lucide-react';
+import { motion, AnimatePresence } from 'motion/react';
 import * as XLSX from 'xlsx';
+import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, BarChart, Bar, XAxis, YAxis, CartesianGrid } from 'recharts';
 import { initialWords, type WordEntry } from './data/initialWords.ts';
+import { initialTypos, type TypoEntry } from './data/initialTypos.ts';
 import { 
   db, collection, doc, setDoc, getDoc, getDocs, deleteDoc, query, limit, onSnapshot, increment,
   OperationType, handleFirestoreError 
 } from './lib/firebase.ts';
 import { PustakaDigital } from './components/PustakaDigital.tsx';
+
+const getLocalDateString = (d: Date = new Date()) => {
+  const offset = d.getTimezoneOffset();
+  const localDate = new Date(d.getTime() - (offset * 60 * 1000));
+  return localDate.toISOString().split('T')[0];
+};
+
+// Calculate Levenshtein distance between two strings
+const levenshteinDistance = (s1: string, s2: string): number => {
+  const m = s1.length;
+  const n = s2.length;
+  const dp: number[][] = Array.from({ length: m + 1 }, () => Array(n + 1).fill(0));
+
+  for (let i = 0; i <= m; i++) dp[i][0] = i;
+  for (let j = 0; j <= n; j++) dp[0][j] = j;
+
+  for (let i = 1; i <= m; i++) {
+    for (let j = 1; j <= n; j++) {
+      if (s1[i - 1] === s2[j - 1]) {
+        dp[i][j] = dp[i - 1][j - 1];
+      } else {
+        dp[i][j] = Math.min(
+          dp[i - 1][j] + 1,    // deletion
+          dp[i][j - 1] + 1,    // insertion
+          dp[i - 1][j - 1] + 1 // substitution
+        );
+      }
+    }
+  }
+  return dp[m][n];
+};
+
+// Calculate match score for typo entries (100 = exact prefix/substring, high score = close fuzzy match)
+const getFuzzyScore = (targetStr: string, queryStr: string): number => {
+  const target = targetStr.toLowerCase().trim();
+  const query = queryStr.toLowerCase().trim();
+  if (!query) return 100;
+
+  // Exact Match
+  if (target === query) return 100;
+
+  // Contains exact substring in key positions
+  if (target.startsWith(query)) return 95;
+  if (target.includes(query)) return 90;
+
+  // Distance similarity
+  const maxLen = Math.max(target.length, query.length);
+  if (maxLen === 0) return 0;
+
+  const dist = levenshteinDistance(target, query);
+  const similarity = 1 - dist / maxLen;
+
+  // Under certain size, restrict Levenshtein to prevent false positives
+  if (query.length <= 2) {
+    return 0; // If length <= 2 and doesn't match substring/prefix, don't fuzzy-match
+  }
+
+  if (similarity >= 0.5) {
+    return Math.round(similarity * 80);
+  }
+
+  // Subsequence match (e.g. "bku" in "baku" or "aksra" in "aksara")
+  let qIdx = 0;
+  for (let tIdx = 0; tIdx < target.length && qIdx < query.length; tIdx++) {
+    if (target[tIdx] === query[qIdx]) qIdx++;
+  }
+  if (qIdx === query.length) {
+    return 50;
+  }
+
+  return 0;
+};
+
+// Utility to convert SVG in Recharts to high-resolution PNG for download
+const downloadChartAsPng = (containerId: string, filename: string) => {
+  const container = document.getElementById(containerId);
+  if (!container) return;
+
+  const svgElement = container.querySelector('svg');
+  if (!svgElement) return;
+
+  try {
+    const clonedSvg = svgElement.cloneNode(true) as SVGElement;
+    const width = svgElement.clientWidth || svgElement.getBoundingClientRect().width || 560;
+    const height = svgElement.clientHeight || svgElement.getBoundingClientRect().height || 260;
+    
+    clonedSvg.setAttribute('width', width.toString());
+    clonedSvg.setAttribute('height', height.toString());
+
+    // Dynamically retrieve if dark mode is active to apply beautiful visual themes to downloaded files
+    const isDark = document.documentElement.classList.contains('dark') || document.body.classList.contains('dark');
+    const bgColor = isDark ? '#1e1c1a' : '#ffffff';
+    const textColor = isDark ? '#f4efe8' : '#1a1a1a';
+    const gridColor = isDark ? 'rgba(244, 239, 232, 0.1)' : '#cbd5e1';
+
+    clonedSvg.style.backgroundColor = bgColor;
+    
+    // Inject stylesheet to ensure correct text matching & fonts inside standalone SVG data-url context
+    const styleEl = document.createElementNS('http://www.w3.org/2000/svg', 'style');
+    styleEl.textContent = `
+      text { fill: ${textColor} !important; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace !important; font-size: 10px !important; }
+      .recharts-cartesian-grid-horizontal line, .recharts-cartesian-grid-vertical line { stroke: ${gridColor} !important; stroke-dasharray: 3 3; }
+      .recharts-label { fill: ${textColor} !important; }
+    `;
+    clonedSvg.appendChild(styleEl);
+
+    const svgString = new XMLSerializer().serializeToString(clonedSvg);
+    const svgBlob = new Blob([svgString], { type: 'image/svg+xml;charset=utf-8' });
+    const blobURL = window.URL.createObjectURL(svgBlob);
+
+    const image = new Image();
+    image.onload = () => {
+      const canvas = document.createElement('canvas');
+      canvas.width = width * 2; // high definition scale-up
+      canvas.height = height * 2;
+      const context = canvas.getContext('2d');
+      if (context) {
+        context.imageSmoothingEnabled = true;
+        context.imageSmoothingQuality = 'high';
+        context.scale(2, 2);
+
+        // Fill background first (transparent SVGs would have artifacts)
+        context.fillStyle = bgColor;
+        context.fillRect(0, 0, width, height);
+
+        context.drawImage(image, 0, 0, width, height);
+        
+        const pngURL = canvas.toDataURL('image/png');
+        const downloadLink = document.createElement('a');
+        downloadLink.href = pngURL;
+        downloadLink.download = filename;
+        document.body.appendChild(downloadLink);
+        downloadLink.click();
+        document.body.removeChild(downloadLink);
+      }
+      window.URL.revokeObjectURL(blobURL);
+    };
+    image.src = blobURL;
+  } catch (error) {
+    console.error('Gagal mengunduh grafik:', error);
+  }
+};
 
 // Simple Error Boundary
 interface ErrorBoundaryProps {
@@ -80,10 +225,108 @@ interface BypassEmail {
   createdAt: string;
 }
 
+interface CustomToast {
+  id: string;
+  message: string;
+  type: 'info' | 'error' | 'success';
+  duration: number;
+}
+
+const ToastItem: React.FC<{ toast: CustomToast; onClose: (id: string) => void }> = ({ toast, onClose }) => {
+  const [progress, setProgress] = useState(100);
+
+  useEffect(() => {
+    const startTime = Date.now();
+    const interval = setInterval(() => {
+      const elapsed = Date.now() - startTime;
+      const remaining = Math.max(0, 100 - (elapsed / toast.duration) * 100);
+      setProgress(remaining);
+      if (remaining === 0) {
+        clearInterval(interval);
+      }
+    }, 30);
+
+    const timeout = setTimeout(() => {
+      onClose(toast.id);
+    }, toast.duration);
+
+    return () => {
+      clearInterval(interval);
+      clearTimeout(timeout);
+    };
+  }, [toast, onClose]);
+
+  const bgStyle = toast.type === 'error'
+    ? 'bg-red-50/95 border-red-200 text-red-950 shadow-red-100/10'
+    : toast.type === 'success'
+    ? 'bg-emerald-50/95 border-emerald-200 text-emerald-950 shadow-emerald-100/10'
+    : 'bg-[#1a1a1a]/95 text-white border-white/10 shadow-[0_12px_40px_rgba(0,0,0,0.25)]';
+
+  const progressColor = toast.type === 'error'
+    ? 'bg-red-500'
+    : toast.type === 'success'
+    ? 'bg-emerald-500'
+    : 'bg-blue-400';
+
+  return (
+    <motion.div
+      layout
+      initial={{ opacity: 0, y: 50, scale: 0.95 }}
+      animate={{ opacity: 1, y: 0, scale: 1 }}
+      exit={{ opacity: 0, y: -20, scale: 0.9, transition: { duration: 0.15 } }}
+      className={`relative w-full max-w-sm overflow-hidden rounded-lg border p-4 shadow-xl flex gap-3.5 backdrop-blur-md transition-all ${bgStyle}`}
+    >
+      <div className="shrink-0 pt-0.5">
+        {toast.type === 'success' && <CheckCircle className="w-5 h-5 text-emerald-600" />}
+        {toast.type === 'error' && <AlertCircle className="w-5 h-5 text-red-600" />}
+        {toast.type === 'info' && <Clock className="w-5 h-5 text-blue-400" />}
+      </div>
+      
+      <div className="flex-1 min-w-0 pr-2">
+        <p className="text-xs font-sans font-bold leading-relaxed tracking-wide select-text">{toast.message}</p>
+      </div>
+
+      <button
+        type="button"
+        onClick={() => onClose(toast.id)}
+        className={`shrink-0 rounded-full p-1 transition-colors self-start -mt-1 -mr-1 ${
+          toast.type === 'info' ? 'hover:bg-white/10 text-gray-400 hover:text-white' : 'hover:bg-black/5 text-gray-500 hover:text-gray-800'
+        }`}
+      >
+        <X size={14} />
+      </button>
+
+      {/* Progress Bar */}
+      <div className="absolute bottom-0 left-0 right-0 h-[3px] bg-black/5">
+        <div 
+          className={`h-full transition-all duration-300 ${progressColor}`}
+          style={{ width: `${progress}%` }}
+        />
+      </div>
+    </motion.div>
+  );
+};
+
 function MainApp() {
   const [searchQuery, setSearchQuery] = useState('');
   const [isAdmin, setIsAdmin] = useState(false);
   const [user, setUser] = useState<any>(null);
+  const [darkMode, setDarkMode] = useState<boolean>(() => {
+    if (typeof window !== 'undefined') {
+      return localStorage.getItem('theme') === 'dark';
+    }
+    return false;
+  });
+
+  useEffect(() => {
+    if (darkMode) {
+      document.documentElement.classList.add('dark');
+      localStorage.setItem('theme', 'dark');
+    } else {
+      document.documentElement.classList.remove('dark');
+      localStorage.setItem('theme', 'light');
+    }
+  }, [darkMode]);
   const [words, setWords] = useState<WordEntry[]>([]);
   const [result, setResult] = useState<WordEntry | null>(null);
   const [history, setHistory] = useState<string[]>([]);
@@ -97,8 +340,7 @@ function MainApp() {
   const [isOffline, setIsOffline] = useState(!navigator.onLine);
   const [lastUpload, setLastUpload] = useState<{timestamp: string, count: number} | null>(null);
   const [stats, setStats] = useState({ totalSearches: 0, totalInstalls: 0 });
-  const [statusMessage, setStatusMessage] = useState<string | null>(null);
-  const [statusType, setStatusType] = useState<'info' | 'error' | 'success'>('info');
+  const [toasts, setToasts] = useState<CustomToast[]>([]);
 
   // Tab navigation state
   const [activeTab, setActiveTab] = useState<'kamus' | 'pemeriksa' | 'pustaka'>('kamus');
@@ -125,6 +367,12 @@ function MainApp() {
   const [isSubmittingPayment, setIsSubmittingPayment] = useState<boolean>(false);
   const [allPayments, setAllPayments] = useState<any[]>([]);
   const [allEvaluations, setAllEvaluations] = useState<any[]>([]);
+  const [hasWarnedEvaluationsLimit, setHasWarnedEvaluationsLimit] = useState<boolean>(false);
+  const [dailySearches, setDailySearches] = useState<{ date: string; count: number }[]>([]);
+  const [chartStartDate, setChartStartDate] = useState<string>('');
+  const [chartStartTime, setChartStartTime] = useState<string>('00:00');
+  const [chartEndDate, setChartEndDate] = useState<string>('');
+  const [chartEndTime, setChartEndTime] = useState<string>('23:59');
   const [payStatus, setPayStatus] = useState<string>('');
   const [payUsageCount, setPayUsageCount] = useState<number>(0);
   const [allowedLimit, setAllowedLimit] = useState<number>(10);
@@ -132,8 +380,121 @@ function MainApp() {
   const [qrisImageInput, setQrisImageInput] = useState<string>('');
   const [amountInput, setAmountInput] = useState<number>(5000);
   const [qrisOption, setQrisOption] = useState<'url' | 'upload'>('url');
-  const [selectedAdminSubTab, setSelectedAdminSubTab] = useState<'rekap_bayar' | 'riwayat_eval' | 'pengaturan_bayar' | 'bypass_emails'>('rekap_bayar');
+  const [selectedAdminSubTab, setSelectedAdminSubTab] = useState<'rekap_bayar' | 'riwayat_eval' | 'pengaturan_bayar' | 'bypass_emails' | 'kelola_typo'>('rekap_bayar');
   const [adminTypoMode, setAdminTypoMode] = useState<'checker' | 'admin'>('checker');
+  const [typos, setTypos] = useState<TypoEntry[]>([]);
+  const [isSeedingTypos, setIsSeedingTypos] = useState(false);
+  const [typoSearchQuery, setTypoSearchQuery] = useState('');
+  const [showTypoFormModal, setShowTypoFormModal] = useState(false);
+  const [typoFormMode, setTypoFormMode] = useState<'add' | 'edit'>('add');
+  const [typoFormFields, setTypoFormFields] = useState<{ typo: string; correction: string; originalTypo?: string }>({ typo: '', correction: '' });
+
+  // Calculate top typos distribution from allEvaluations dynamically
+  const typoDistributionData = useMemo(() => {
+    if (allEvaluations.length === 0) return [];
+
+    // Fast set of valid words
+    const validWordsSet = new Set<string>();
+    words.forEach(w => validWordsSet.add(w.word.toLowerCase().trim()));
+    initialWords.forEach(w => validWordsSet.add(w.word.toLowerCase().trim()));
+
+    const typosMap = new Map<string, string>();
+    typos.forEach(t => {
+      const tKey = t.typo.toLowerCase().trim();
+      const cVal = t.correction.toLowerCase().trim();
+      typosMap.set(tKey, cVal);
+      validWordsSet.add(cVal);
+    });
+
+    const COMMON_INDONESIAN = [
+      'dan', 'atau', 'di', 'ke', 'dari', 'yang', 'yg', 'ini', 'itu', 'dengan', 
+      'untuk', 'pada', 'bagi', 'oleh', 'tentang', 'sebagai', 'ia', 'mereka', 
+      'kami', 'kita', 'saya', 'aku', 'kamu', 'engkau', 'anda', 'dia', 'nya', 
+      'adalah', 'yaitu', 'yakni', 'karena', 'juga', 'saja', 'telah', 'sudah', 
+      'sedang', 'akan', 'bisa', 'dapat', 'namun', 'tetapi', 'bahwa', 'apakah', 
+      'siapa', 'apa', 'sejak', 'hanya', 'serta', 'jika', 'bila', 'pula', 
+      'pun', 'lah', 'kah', 'tapi', 'tidak', 'tak', 'belum', 'ada', 'dalam', 
+      'luar', 'atas', 'bawah', 'sangat', 'amat', 'sekali', 'lebih', 'paling',
+      'bukan', 'maupun', 'secara', 'setiap', 'banyak', 'beberapa', 'semua',
+      'bagaimana', 'mengapa', 'kenapa', 'sebab', 'maka', 'sehingga', 'lalu',
+      'kemudian', 'kok', 'sih', 'dong', 'kan', 'deh', 'loh', 'oh', 'ah', 'wah', 'hal'
+    ];
+    COMMON_INDONESIAN.forEach(w => validWordsSet.add(w.toLowerCase().trim()));
+
+    const typoCounts: { [key: string]: number } = {};
+
+    allEvaluations.forEach(ev => {
+      if (!ev.inputText) return;
+      const tokens = ev.inputText.split(/[^a-zA-ZáéíóúÁÉÍÓÚ'-]+/);
+      tokens.forEach((token: string) => {
+        const stripped = token.toLowerCase().trim();
+        if (!stripped || stripped.length <= 1) return;
+
+        if (typosMap.has(stripped)) {
+          typoCounts[stripped] = (typoCounts[stripped] || 0) + 1;
+        } else if (!validWordsSet.has(stripped)) {
+          typoCounts[stripped] = (typoCounts[stripped] || 0) + 1;
+        }
+      });
+    });
+
+    const sorted = Object.entries(typoCounts)
+      .map(([name, value]) => ({ name, value }))
+      .sort((a, b) => b.value - a.value);
+
+    if (sorted.length <= 6) {
+      return sorted;
+    } else {
+      const top = sorted.slice(0, 5);
+      const othersCount = sorted.slice(5).reduce((sum, item) => sum + item.value, 0);
+      if (othersCount > 0) {
+        top.push({ name: 'Lainnya', value: othersCount });
+      }
+      return top;
+    }
+  }, [allEvaluations, words, typos]);
+
+  // Filter daily searches based on date range (searches are stored daily)
+  const filteredDailySearches = useMemo(() => {
+    return dailySearches.filter(item => {
+      if (chartStartDate && item.date < chartStartDate) return false;
+      if (chartEndDate && item.date > chartEndDate) return false;
+      return true;
+    });
+  }, [dailySearches, chartStartDate, chartEndDate]);
+
+  // Group evaluation logs dynamically by local date incorporating date and time filters
+  const filteredDailyEvaluations = useMemo(() => {
+    const groups: { [dateStr: string]: number } = {};
+
+    // Build filter threshold bounds
+    const startBound = chartStartDate ? new Date(`${chartStartDate}T${chartStartTime || '00:00'}`).getTime() : null;
+    const endBound = chartEndDate ? new Date(`${chartEndDate}T${chartEndTime || '23:59'}`).getTime() : null;
+
+    allEvaluations.forEach(ev => {
+      if (ev.timestamp) {
+        try {
+          const d = new Date(ev.timestamp);
+          const time = d.getTime();
+
+          // Evaluate boundaries
+          if (startBound !== null && time < startBound) return;
+          if (endBound !== null && time > endBound) return;
+
+          // Process YYYY-MM-DD grouping
+          const dateStr = getLocalDateString(d);
+          groups[dateStr] = (groups[dateStr] || 0) + 1;
+        } catch (e) {
+          // ignore parsing error
+        }
+      }
+    });
+
+    // Convert to sorted array
+    return Object.keys(groups)
+      .map(date => ({ date, count: groups[date] }))
+      .sort((a, b) => a.date.localeCompare(b.date));
+  }, [allEvaluations, chartStartDate, chartStartTime, chartEndDate, chartEndTime]);
 
   // Bypass whitelist emails state
   const [bypassEmailsList, setBypassEmailsList] = useState<BypassEmail[]>([]);
@@ -147,12 +508,28 @@ function MainApp() {
   };
 
   const showStatus = (msg: string, type: 'info' | 'error' | 'success' = 'info', duration = 5000) => {
-    setStatusMessage(msg);
-    setStatusType(type);
-    setTimeout(() => {
-      setStatusMessage(current => current === msg ? null : current);
-    }, duration);
+    const id = Math.random().toString(36).substring(2, 9);
+    setToasts(prev => [...prev, { id, message: msg, type, duration }]);
   };
+
+  const removeToast = (id: string) => {
+    setToasts(prev => prev.filter(t => t.id !== id));
+  };
+
+  useEffect(() => {
+    if (allEvaluations.length > 250) {
+      if (!hasWarnedEvaluationsLimit) {
+        showStatus(
+          "Peringatan Sistem: Jumlah riwayat log evaluasi telah mencapai " + allEvaluations.length + " data (melebihi batas aman 250 log). Disarankan untuk segera melakukan pembersihan data log secara berkala demi menjaga performa optimal aplikasi.",
+          "error",
+          10000
+        );
+        setHasWarnedEvaluationsLimit(true);
+      }
+    } else {
+      setHasWarnedEvaluationsLimit(false);
+    }
+  }, [allEvaluations.length, hasWarnedEvaluationsLimit]);
 
   // Word distance algorithm (Levenshtein)
   const getDistance = (a: string, b: string): number => {
@@ -174,6 +551,94 @@ function MainApp() {
       }
     }
     return tmp[a.length][b.length];
+  };
+
+  // Fuzzy suggestions for Admin when managing typo collection
+  const adminFuzzySuggestions = useMemo(() => {
+    const queryTypo = typoFormFields.typo.trim().toLowerCase();
+    const queryCorrection = typoFormFields.correction.trim().toLowerCase();
+
+    if (!queryTypo && !queryCorrection) return [];
+
+    const list: {
+      type: 'warning_duplicate' | 'similar_typo' | 'similar_baku';
+      message: string;
+      typo: string;
+      correction: string;
+    }[] = [];
+
+    // Combine loaded words in DB and initialWords
+    const allKnownBaku = Array.from(new Set([
+      ...words.map(w => w.word.toLowerCase().trim()),
+      ...initialWords.map(w => w.word.toLowerCase().trim())
+    ]));
+
+    // Check exact or partial duplicates in loaded typos
+    typos.forEach(t => {
+      const tLower = t.typo.toLowerCase().trim();
+      const cLower = t.correction.toLowerCase().trim();
+
+      // If typo is an exact match already
+      if (queryTypo && tLower === queryTypo) {
+        list.push({
+          type: 'warning_duplicate',
+          message: `🚨 '${t.typo}' sudah terdaftar dengan bentuk baku: '${t.correction}'`,
+          typo: t.typo,
+          correction: t.correction
+        });
+      } else if (queryTypo && getDistance(tLower, queryTypo) <= 2) {
+        // Similar typo found
+        list.push({
+          type: 'similar_typo',
+          message: `💡 Typo serupa terdaftar: '${t.typo}' → '${t.correction}'`,
+          typo: t.typo,
+          correction: t.correction
+        });
+      }
+
+      // Check if the correction entered by the user is similar to some existing typos/corrections
+      if (queryCorrection && cLower === queryCorrection && tLower === queryTypo) {
+        // Exact match of both - handled by duplicate
+      } else if (queryCorrection && getDistance(cLower, queryCorrection) <= 1) {
+        list.push({
+          type: 'similar_baku',
+          message: `💡 Bentuk baku '${t.correction}' (dari '${t.typo}') mirip dengan yang Anda ketik`,
+          typo: t.typo,
+          correction: t.correction
+        });
+      }
+    });
+
+    // Also look up words in the standard KBBI dictionary to suggest correct form
+    if (queryTypo) {
+      allKnownBaku.forEach(kbbiWord => {
+        const dist = getDistance(kbbiWord, queryTypo);
+        if (dist >= 1 && dist <= 2) {
+          list.push({
+            type: 'similar_baku',
+            message: `🌱 Apakah '${kbbiWord}' maksud Anda sebagai bentuk baku?`,
+            typo: queryTypo,
+            correction: kbbiWord
+          });
+        }
+      });
+    }
+
+    // Deduplicate suggestions based on their message
+    const seenMessages = new Set<string>();
+    return list.filter(item => {
+      if (seenMessages.has(item.message)) return false;
+      seenMessages.add(item.message);
+      return true;
+    }).slice(0, 4); // Limit to top 4 suggestions
+  }, [typoFormFields.typo, typoFormFields.correction, typos, words]);
+
+  const applyFuzzySuggestion = (s: { typo: string, correction: string }) => {
+    setTypoFormFields(prev => ({
+      ...prev,
+      typo: s.typo || prev.typo,
+      correction: s.correction || prev.correction
+    }));
   };
 
   const formatRupiah = (val: number) => {
@@ -306,6 +771,7 @@ function MainApp() {
     if (!db || !isAdmin) {
       setAllPayments([]);
       setAllEvaluations([]);
+      setDailySearches([]);
       return;
     }
     // High-scalability: limit payments listener to top 200 items to prevent Firestore pricing/memory blow up
@@ -334,9 +800,32 @@ function MainApp() {
       console.warn("Evaluation log listener error:", err);
     });
 
+    // Listen to daily stats for search count per day
+    const qStats = collection(db, 'stats');
+    const unsubscribeStats = onSnapshot(qStats, (snapshot) => {
+      const statsList: any[] = [];
+      snapshot.forEach((doc) => {
+        if (doc.id !== 'global' && doc.id !== 'install') {
+          const data = doc.data();
+          if (data && typeof data.totalSearches === 'number') {
+            statsList.push({
+              date: doc.id,
+              count: data.totalSearches
+            });
+          }
+        }
+      });
+      // Sort chronologically by date
+      statsList.sort((a, b) => a.date.localeCompare(b.date));
+      setDailySearches(statsList);
+    }, (err) => {
+      console.warn("Daily stats list listener error:", err);
+    });
+
     return () => {
       unsubscribePay();
       unsubscribeEval();
+      unsubscribeStats();
     };
   }, [db, isAdmin]);
 
@@ -440,6 +929,62 @@ function MainApp() {
     } catch (e) {
       console.error(e);
       showStatus("Gagal memproses persetujuan.", "error");
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  const handleDeleteEvaluationLog = async (logId: string) => {
+    if (!db) return;
+    if (!logId) {
+      showStatus("ID log tidak ditemukan.", "error");
+      return;
+    }
+    if (!window.confirm("Apakah Anda yakin ingin menghapus log pemeriksaan ini?")) return;
+    try {
+      setIsProcessing(true);
+      // Optimistic state update for instant response feel
+      setAllEvaluations(prev => prev.filter(t => t.id !== logId));
+      await deleteDoc(doc(db, 'evaluations', logId));
+      showStatus("Log pemeriksaan berhasil dihapus.", "success");
+    } catch (e) {
+      console.error(e);
+      showStatus("Gagal menghapus log pemeriksaan.", "error");
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  const handleClearAllEvaluationLogs = async () => {
+    if (!db) return;
+    const validEvals = allEvaluations.filter(ev => ev.id);
+    if (validEvals.length === 0) {
+      showStatus("Tidak ada log riwayat pemeriksaan untuk dihapus.", "info");
+      return;
+    }
+    if (!window.confirm(`PERINGATAN KRITIS: Apakah Anda yakin ingin menghapus SELURUH (${validEvals.length}) riwayat log pemeriksaan? Tindakan ini tidak dapat dibatalkan.`)) return;
+    try {
+      setIsProcessing(true);
+      // Clean immediately in the UI state
+      setAllEvaluations([]);
+      
+      // Perform chunked sequential/parallel delete to respect Firestore limit structures and save client socket overload
+      const chunkSize = 15;
+      for (let i = 0; i < validEvals.length; i += chunkSize) {
+        const chunk = validEvals.slice(i, i + chunkSize);
+        await Promise.all(chunk.map(async (ev) => {
+          try {
+            await deleteDoc(doc(db, 'evaluations', ev.id));
+          } catch (err) {
+            console.warn(`Gagal menghapus log: ${ev.id}`, err);
+          }
+        }));
+      }
+
+      showStatus(`Berhasil membersihkan seluruh (${validEvals.length}) log pemeriksaan!`, "success");
+    } catch (e) {
+      console.error(e);
+      showStatus("Gagal membersihkan semua log pemeriksaan.", "error");
     } finally {
       setIsProcessing(false);
     }
@@ -588,7 +1133,11 @@ function MainApp() {
       showStatus("Tidak ada riwayat evaluasi untuk diunduh.", "info");
       return;
     }
+    const now = new Date();
     const exportData = [
+      ["LAPORAN RIWAYAT PEMERIKSAAN TYPO"],
+      ["Waktu Diunduh:", now.toLocaleString("id-ID")],
+      [],
       ["Email Pengguna", "Waktu Pemeriksaan", "Total Kata", "Typo Terdeteksi", "Skor Presisi", "Teks Input"]
     ];
     allEvaluations.forEach(e => {
@@ -604,7 +1153,10 @@ function MainApp() {
     const ws = XLSX.utils.aoa_to_sheet(exportData);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "Riwayat Evaluasi");
-    XLSX.writeFile(wb, "Riwayat_Evaluasi_Pemeriksa_Typo.xlsx");
+    
+    const dateFormatted = now.toLocaleDateString("id-ID").replace(/\//g, "-");
+    const timeFormatted = now.toLocaleTimeString("id-ID", { hour: '2-digit', minute: '2-digit' }).replace(/:/g, ".");
+    XLSX.writeFile(wb, `Riwayat_Evaluasi_Pemeriksa_Typo_${dateFormatted}_${timeFormatted}.xlsx`);
     showStatus("Data riwayat periksa berhasil diunduh!", "success");
   };
 
@@ -697,6 +1249,16 @@ function MainApp() {
     words.forEach(w => validWordsSet.add(w.word.toLowerCase().trim()));
     initialWords.forEach(w => validWordsSet.add(w.word.toLowerCase().trim()));
 
+    // Synchronize correct words and build typo direct correction map
+    const typosMap = new Map<string, string>();
+    typos.forEach(t => {
+      const tKey = t.typo.toLowerCase().trim();
+      const cVal = t.correction.toLowerCase().trim();
+      typosMap.set(tKey, cVal);
+      // Synchronize typo correction forms into valid KBBI set
+      validWordsSet.add(cVal);
+    });
+
     const COMMON_INDONESIAN = [
       'dan', 'atau', 'di', 'ke', 'dari', 'yang', 'yg', 'ini', 'itu', 'dengan', 
       'untuk', 'pada', 'bagi', 'oleh', 'tentang', 'sebagai', 'ia', 'mereka', 
@@ -721,10 +1283,36 @@ function MainApp() {
       }
 
       const stripped = token.toLowerCase();
+
+      // casing format helper
+      const formatCase = (suggWord: string) => {
+        if (token === token.toUpperCase()) {
+          return suggWord.toUpperCase();
+        } else if (token[0] === token[0].toUpperCase()) {
+          return suggWord.charAt(0).toUpperCase() + suggWord.slice(1);
+        }
+        return suggWord;
+      };
+
+      // 1. Direct typo check from the Admin typos database
+      if (typosMap.has(stripped)) {
+        const correctForm = typosMap.get(stripped)!;
+        const formatted = formatCase(correctForm);
+        return {
+          text: token,
+          isWord: true,
+          isTypo: true,
+          bestSuggestion: formatted,
+          suggestions: [formatted]
+        };
+      }
+
+      // 2. Exact match in standard/synchronized KBBI vocabulary
       if (validWordsSet.has(stripped)) {
         return { text: token, isWord: true, isTypo: false };
       }
 
+      // 3. Distance fallback against standardized words
       const candidates: { word: string; dist: number }[] = [];
       validWordsSet.forEach(vWord => {
         if (Math.abs(vWord.length - stripped.length) <= 3) {
@@ -740,14 +1328,7 @@ function MainApp() {
         return Math.abs(x.word.length - stripped.length) - Math.abs(y.word.length - stripped.length);
       });
 
-      const listSugg = candidates.slice(0, 3).map(c => {
-        if (token === token.toUpperCase()) {
-          return c.word.toUpperCase();
-        } else if (token[0] === token[0].toUpperCase()) {
-          return c.word.charAt(0).toUpperCase() + c.word.slice(1);
-        }
-        return c.word;
-      });
+      const listSugg = candidates.slice(0, 3).map(c => formatCase(c.word));
 
       return {
         text: token,
@@ -1228,6 +1809,23 @@ function MainApp() {
     return () => unsubscribe();
   }, []);
 
+  // Listen for Firestore typos data updates
+  useEffect(() => {
+    if (!db) return;
+    const q = query(collection(db, 'typos'), limit(1500));
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const typosData: TypoEntry[] = [];
+      snapshot.forEach((doc) => {
+        typosData.push(doc.data() as TypoEntry);
+      });
+      console.log(`Loaded ${typosData.length} typos from Firestore`);
+      setTypos(typosData);
+    }, (err) => {
+      console.warn("Firestore typos listener error:", err.message);
+    });
+    return () => unsubscribe();
+  }, []);
+
   // Listen for global stats
   useEffect(() => {
     if (!db) return;
@@ -1266,7 +1864,11 @@ function MainApp() {
     try {
       // Fetch all words for export
       const querySnapshot = await getDocs(collection(db, 'words'));
+      const now = new Date();
       const exportData: any[][] = [
+        ["DATABASE LEKSIKON KAMUS PINTAR"],
+        ["Waktu Diunduh:", now.toLocaleString("id-ID")],
+        [],
         ["Kata", "Kategori", "Etimologi", "Definisi", "Contoh Kalimat", "Jumlah Pencarian"]
       ];
 
@@ -1285,7 +1887,10 @@ function MainApp() {
       const ws = XLSX.utils.aoa_to_sheet(exportData);
       const wb = XLSX.utils.book_new();
       XLSX.utils.book_append_sheet(wb, ws, "Database Leksikon");
-      XLSX.writeFile(wb, `Database_Leksikon_${new Date().toISOString().split('T')[0]}.xlsx`);
+      
+      const dateFormatted = now.toLocaleDateString("id-ID").replace(/\//g, "-");
+      const timeFormatted = now.toLocaleTimeString("id-ID", { hour: '2-digit', minute: '2-digit' }).replace(/:/g, ".");
+      XLSX.writeFile(wb, `Database_Leksikon_Kamus_${dateFormatted}_${timeFormatted}.xlsx`);
     } catch (err) {
       console.error("Export error:", err);
       showStatus("Gagal mengekspor data.", 'error');
@@ -1369,6 +1974,185 @@ function MainApp() {
       }
     };
     reader.readAsBinaryString(file);
+  };
+
+  // Seeding typos
+  const seedTyposCollection = async () => {
+    if (!db) {
+      showStatus("Basis data tidak tersedia.", "error");
+      return;
+    }
+    setIsSeedingTypos(true);
+    showStatus("Sedang mengimpor 500+ contoh typo awal...", "info");
+    try {
+      let count = 0;
+      for (const t of initialTypos) {
+        const typoId = t.typo.toLowerCase().trim();
+        await setDoc(doc(db, "typos", typoId), {
+          typo: t.typo.trim(),
+          correction: t.correction.trim(),
+          updatedAt: new Date().toISOString()
+        });
+        count++;
+      }
+      showStatus(`Berhasil mengimpor ${count} contoh typo ke database cloud!`, "success");
+    } catch (err: any) {
+      console.error(err);
+      showStatus(`Gagal mengimpor typo: ${err.message}`, "error");
+    } finally {
+      setIsSeedingTypos(false);
+    }
+  };
+
+  // Download typos (Excel Export)
+  const downloadTyposExcel = () => {
+    if (typos.length === 0) {
+      showStatus("Tidak ada data typo untuk diunduh.", "error");
+      return;
+    }
+    const now = new Date();
+    const exportData: any[][] = [
+      ["DATABASE KOREKSI TYPO KBBI"],
+      ["Waktu Diunduh:", now.toLocaleString("id-ID")],
+      [],
+      ["Kata Typo", "Koreksi KBBI"]
+    ];
+    typos.forEach(t => {
+      exportData.push([t.typo, t.correction]);
+    });
+
+    const ws = XLSX.utils.aoa_to_sheet(exportData);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Database Typo");
+    
+    const dateFormatted = now.toLocaleDateString("id-ID").replace(/\//g, "-");
+    const timeFormatted = now.toLocaleTimeString("id-ID", { hour: '2-digit', minute: '2-digit' }).replace(/:/g, ".");
+    XLSX.writeFile(wb, `Database_Typo_${dateFormatted}_${timeFormatted}.xlsx`);
+    showStatus("Berhasil mengunduh basis data typo.", "success");
+  };
+
+  // Upload typos (Excel Import)
+  const handleTypoFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (!user) {
+      showStatus("Harap login sebagai admin untuk mengunggah file.", "info");
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = async (evt) => {
+      if (!db) {
+        showStatus("Basis data tidak tersedia.", "error");
+        return;
+      }
+      showStatus("Sedang membaca file Excel...", "info");
+      
+      try {
+        const bstr = evt.target?.result as string;
+        const wb = XLSX.read(bstr, { type: 'binary' });
+        const wsname = wb.SheetNames[0];
+        const ws = wb.Sheets[wsname];
+        const data = XLSX.utils.sheet_to_json(ws, { header: 1 }) as any[][];
+
+        // A: Kata Typo, B: Koreksi KBBI
+        const validRows = data.slice(1).filter(row => row[0] && row[1]); 
+        
+        let successCount = 0;
+        for (const row of validRows) {
+          const typoStr = String(row[0]).trim();
+          const correctionStr = String(row[1]).trim();
+          
+          if (typoStr.toLowerCase() === correctionStr.toLowerCase()) continue;
+
+          await setDoc(doc(db, 'typos', typoStr.toLowerCase()), {
+            typo: typoStr,
+            correction: correctionStr,
+            updatedAt: new Date().toISOString()
+          });
+          successCount++;
+        }
+
+        showStatus(`Berhasil mengimpor ${successCount} data typo ke database.`, "success");
+      } catch (err: any) {
+        console.error(err);
+        showStatus("Gagal membaca file Excel typo. Format kolom harus: Kata Typo, Koreksi KBBI", "error");
+      } finally {
+        if (e.target) e.target.value = '';
+      }
+    };
+    reader.readAsBinaryString(file);
+  };
+
+  // Manual Add/Edit and Save Typo
+  const handleSaveManualTypo = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!db) {
+      showStatus("Basis data tidak tersedia.", "error");
+      return;
+    }
+
+    const tInput = typoFormFields.typo.trim();
+    const cInput = typoFormFields.correction.trim();
+
+    if (!tInput || !cInput) {
+      showStatus("Mohon isi semua bidang form.", "error");
+      return;
+    }
+
+    if (tInput.toLowerCase() === cInput.toLowerCase()) {
+      showStatus("Kata typo tidak boleh sama dengan kata koreksinya.", "error");
+      return;
+    }
+
+    if (typoFormMode === 'add') {
+      const isDuplicate = typos.some(t => t.typo.toLowerCase().trim() === tInput.toLowerCase().trim());
+      if (isDuplicate) {
+        showStatus(`Saran Duplikasi: Kata typo '${tInput}' sudah terdaftar dalam sistem!`, "error");
+        return;
+      }
+    }
+
+    try {
+      const typoId = tInput.toLowerCase();
+      
+      // If editing and the typo identifier changed, delete the old document
+      if (typoFormMode === 'edit' && typoFormFields.originalTypo && typoFormFields.originalTypo.toLowerCase() !== typoId) {
+        await deleteDoc(doc(db, 'typos', typoFormFields.originalTypo.toLowerCase()));
+      }
+
+      await setDoc(doc(db, 'typos', typoId), {
+        typo: tInput,
+        correction: cInput,
+        updatedAt: new Date().toISOString()
+      });
+
+      showStatus(typoFormMode === 'add' ? "Berhasil menambahkan typo!" : "Berhasil memperbarui typo!", "success");
+      setShowTypoFormModal(false);
+      setTypoFormFields({ typo: '', correction: '' });
+    } catch (err: any) {
+      console.error(err);
+      showStatus(`Gagal menyimpan typo: ${err.message}`, "error");
+    }
+  };
+
+  // Delete Typo
+  const handleDeleteTypo = async (typoStr: string) => {
+    if (!db) {
+      showStatus("Basis data tidak tersedia.", "error");
+      return;
+    }
+
+    if (window.confirm(`Hapus koreksi typo "${typoStr}"?`)) {
+      try {
+        await deleteDoc(doc(db, 'typos', typoStr.toLowerCase().trim()));
+        showStatus("Koreksi typo berhasil dihapus.", "success");
+      } catch (err: any) {
+        console.error(err);
+        showStatus(`Gagal menghapus typo: ${err.message}`, "error");
+      }
+    }
   };
 
   // Load history
@@ -1491,6 +2275,14 @@ function MainApp() {
             totalSearches: increment(1)
           }, { merge: true }).catch(e => {
             console.warn("Search count increment queued or failed:", e.message);
+          });
+
+          // Increment daily stats searches
+          const todayStr = getLocalDateString();
+          setDoc(doc(db, 'stats', todayStr), {
+            totalSearches: increment(1)
+          }, { merge: true }).catch(e => {
+            console.warn("Daily search count increment queued or failed:", e.message);
           });
         }
       } else {
@@ -1684,7 +2476,7 @@ function MainApp() {
   };
 
   return (
-    <div className="min-h-screen bg-[#fdfbf7] text-[#1a1a1a] font-serif selection:bg-gray-200 pb-20">
+    <div className={`min-h-screen font-serif transition-colors duration-300 pb-20 ${darkMode ? 'dark bg-[#131211] text-[#f4efe8] selection:bg-[#322c22]' : 'bg-[#fdfbf7] text-[#1a1a1a] selection:bg-gray-200'}`}>
       {/* Header */}
       <header className="max-w-6xl mx-auto px-6 py-6 md:py-8 flex flex-col md:flex-row md:items-center justify-between border-b border-[#1a1a1a]/10 mb-8 md:mb-12">
         <div className="cursor-pointer group flex items-center gap-4" onClick={() => { setResult(null); setSearchQuery(''); }}>
@@ -1703,6 +2495,14 @@ function MainApp() {
           <span className="text-[9px]">Offline</span>
         </div>
       )}
+            <button 
+              onClick={() => setDarkMode(!darkMode)}
+              className="flex items-center gap-2 px-3 py-1.5 border border-gray-200 text-gray-500 hover:border-[#1a1a1a] hover:text-[#1a1a1a] dark:text-gray-400 dark:border-gray-700 dark:hover:border-white dark:hover:text-white rounded-sm transition-all"
+              title={darkMode ? 'Ganti ke Mode Terang' : 'Ganti ke Mode Gelap'}
+            >
+              {darkMode ? <Sun size={12} className="text-amber-400" /> : <Moon size={12} />}
+              <span className="hidden sm:inline">{darkMode ? 'Terang' : 'Gelap'}</span>
+            </button>
             <button 
               onClick={toggleNotifications}
               className={`flex items-center gap-2 px-3 py-1.5 border rounded-sm transition-all ${notificationsEnabled ? 'bg-amber-50 border-amber-200 text-amber-700' : 'border-gray-200 text-gray-400 hover:border-[#1a1a1a] hover:text-[#1a1a1a]'}`}
@@ -2055,9 +2855,14 @@ function MainApp() {
 
         {/* Right Column: Definition View */}
         <div className="md:col-span-8">
-          <React.Fragment>
+          <AnimatePresence mode="wait">
             {isEditing ? (
-              <div 
+              <motion.div 
+                key="isEditing"
+                initial={{ opacity: 0, y: 12 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -12 }}
+                transition={{ duration: 0.2, ease: "easeInOut" }}
                 className="bg-white p-12 shadow-[20px_20px_0px_#e5e2da] border border-[#e5e2da] flex flex-col space-y-8"
               >
                 <div className="flex justify-between items-center border-b border-gray-100 pb-6">
@@ -2135,9 +2940,16 @@ function MainApp() {
                     <Save size={16} /> Simpan ke Basis Data
                   </button>
                 </div>
-              </div>
+              </motion.div>
             ) : error ? (
-              <div className="bg-red-50 border border-red-200 p-12 rounded-sm text-center">
+              <motion.div 
+                key="error"
+                initial={{ opacity: 0, y: 12 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -12 }}
+                transition={{ duration: 0.2, ease: "easeInOut" }}
+                className="bg-red-50 border border-red-200 p-12 rounded-sm text-center"
+              >
                 <div className="max-w-xs mx-auto">
                   <h3 className="font-sans font-bold text-xs uppercase tracking-widest text-red-900 mb-4">Tidak Ditemukan</h3>
                   <p className="text-red-800 italic text-2xl mb-8 leading-relaxed">"{searchQuery}" belum terdaftar dalam leksikon kami.</p>
@@ -2154,9 +2966,14 @@ function MainApp() {
                     </button>
                   )}
                 </div>
-              </div>
+              </motion.div>
             ) : result ? (
-              <div
+              <motion.div
+                key={`result-${result.word}`}
+                initial={{ opacity: 0, y: 12 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -12 }}
+                transition={{ duration: 0.2, ease: "easeInOut" }}
                 className="bg-white p-6 md:p-8 shadow-[15px_15px_0px_#e5e2da] md:shadow-[20px_20px_0px_#e5e2da] border border-[#e5e2da] flex flex-col min-h-[400px]"
               >
                 <div className="mb-6 md:mb-8 flex justify-between items-start">
@@ -2243,16 +3060,23 @@ function MainApp() {
                   </div>
                   <div className="text-[9px] font-sans italic opacity-40">Terakhir diperbarui: {new Date().toLocaleDateString('id-ID')}</div>
                 </div>
-              </div>
+              </motion.div>
             ) : (
-              <div className="h-full flex items-center justify-center border-2 border-dashed border-gray-200 rounded-sm p-12 text-center">
+              <motion.div 
+                key="empty"
+                initial={{ opacity: 0, y: 12 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -12 }}
+                transition={{ duration: 0.2, ease: "easeInOut" }}
+                className="h-full flex items-center justify-center border-2 border-dashed border-gray-200 rounded-sm p-12 text-center"
+              >
                 <div className="max-w-xs">
                   <BookOpen className="mx-auto mb-6 text-gray-200" size={64} />
                   <p className="text-xl italic text-gray-400">Pilih kata di sebelah kiri atau masukkan kata baru untuk melihat definisi lengkap.</p>
                 </div>
-              </div>
+              </motion.div>
             )}
-          </React.Fragment>
+          </AnimatePresence>
         </div>
       </main>
       )}
@@ -2315,6 +3139,12 @@ function MainApp() {
                     className={`px-4 py-2 text-[10px] uppercase font-sans font-bold tracking-wider transition-all rounded-sm ${selectedAdminSubTab === 'bypass_emails' ? 'bg-[#1a1a1a] text-white shadow-md' : 'text-gray-500 hover:text-[#1a1a1a]'}`}
                   >
                     Bypass Typo (Whitelist)
+                  </button>
+                  <button
+                    onClick={() => setSelectedAdminSubTab('kelola_typo')}
+                    className={`px-4 py-2 text-[10px] uppercase font-sans font-bold tracking-wider transition-all rounded-sm ${selectedAdminSubTab === 'kelola_typo' ? 'bg-[#1a1a1a] text-white shadow-md' : 'text-gray-500 hover:text-[#1a1a1a]'}`}
+                  >
+                    Basis Data Typo (KBBI)
                   </button>
                 </div>
               </div>
@@ -2391,59 +3221,372 @@ function MainApp() {
               )}
 
               {/* RIWAYAT PEMERIKSAAN */}
-              {selectedAdminSubTab === 'riwayat_eval' && (
-                <div className="space-y-6 animate-in fade-in duration-300">
-                  <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
-                    <div>
-                      <h3 className="text-xs font-sans font-black uppercase tracking-widest text-[#1a1a1a]">Riwayat Pemeriksaan / Evaluasi Typo Pengguna</h3>
-                      <p className="text-[11px] text-gray-400 font-serif mt-1">Seluruh kata, deteksi kesalahan, teks masukan, dan presisi akurasi pengguna direkam secara deterministik.</p>
+              {selectedAdminSubTab === 'riwayat_eval' && (() => {
+                const PIE_COLORS = ['#1a1a1a', '#ef4444', '#3b82f6', '#ec4899', '#10b981', '#f59e0b', '#8b5cf6'];
+                return (
+                  <div className="space-y-6 animate-in fade-in duration-300">
+                    <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+                      <div>
+                        <h3 className="text-xs font-sans font-black uppercase tracking-widest text-[#1a1a1a]">Riwayat Pemeriksaan / Evaluasi Typo Pengguna</h3>
+                        <p className="text-[11px] text-gray-400 font-serif mt-1">Seluruh kata, deteksi kesalahan, teks masukan, dan presisi akurasi pengguna direkam secara deterministik.</p>
+                      </div>
+                      <div className="flex flex-wrap items-center gap-3 shrink-0">
+                        <button
+                          onClick={downloadTypoEvaluations}
+                          className="px-5 py-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded-[2px] text-[10px] uppercase font-sans font-black tracking-widest flex items-center gap-2 transition-all shadow-md font-sans"
+                        >
+                          <Download size={12} /> Unduh Riwayat (Excel)
+                        </button>
+                        {allEvaluations.length > 0 && (
+                          <button
+                            onClick={handleClearAllEvaluationLogs}
+                            className="px-5 py-3 bg-red-600 hover:bg-red-700 text-white rounded-[2px] text-[10px] uppercase font-sans font-black tracking-widest flex items-center gap-2 transition-all shadow-md font-sans"
+                          >
+                            <Trash2 size={12} /> Hapus Semua Log
+                          </button>
+                        )}
+                      </div>
                     </div>
-                    <button
-                      onClick={downloadTypoEvaluations}
-                      className="px-5 py-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded-[2px] text-[10px] uppercase font-sans font-black tracking-widest flex items-center gap-2 transition-all shadow-md shrink-0 font-sans"
-                    >
-                      <Download size={12} /> Unduh Riwayat (Excel)
-                    </button>
-                  </div>
 
-                  <div className="overflow-x-auto border border-gray-200 rounded-sm">
-                    <table className="w-full text-left font-sans text-xs">
-                      <thead>
-                        <tr className="bg-gray-50 border-b border-gray-200 text-gray-500 uppercase tracking-widest text-[9px] font-black font-sans">
-                          <th className="px-6 py-4">Email</th>
-                          <th className="px-6 py-4">Total Kata</th>
-                          <th className="px-6 py-4">Typo Terdeteksi</th>
-                          <th className="px-6 py-4">Skor Presisi</th>
-                          <th className="px-6 py-4">Hasil Teks</th>
-                          <th className="px-6 py-4">Waktu Check</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-gray-150">
-                        {allEvaluations.length === 0 ? (
-                          <tr>
-                            <td colSpan={6} className="px-6 py-12 text-center text-gray-400 font-serif italic text-sm">
-                              Belum ada riwayat hasil pemeriksaan terdeteksi.
-                            </td>
-                          </tr>
+                    {/* PIE CHART VISUALIZATION */}
+                    {typoDistributionData.length > 0 ? (
+                      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 bg-gray-50 p-4 border border-gray-200 rounded-sm">
+                        {/* Pie Chart Card */}
+                        <div className="bg-white p-4 border border-gray-150 rounded-sm flex flex-col justify-between">
+                          <div>
+                            <h4 className="text-xs font-sans font-black uppercase tracking-wider text-[#1a1a1a] mb-1">
+                              Persentase Distribusi Typo Terbanyak
+                            </h4>
+                            <p className="text-[10px] text-gray-400 font-serif mb-4">
+                              Proporsi visual kesalahan ketik yang paling sering dimasukkan oleh pengguna berdasarkan analisis seluruh teks evaluasi.
+                            </p>
+                          </div>
+                          <div className="h-[260px] w-full flex items-center justify-center font-sans">
+                            <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0}>
+                              <PieChart>
+                                <Pie
+                                  data={typoDistributionData}
+                                  cx="50%"
+                                  cy="50%"
+                                  labelLine={false}
+                                  label={({ name, percent }) => `${name} (${(percent * 100).toFixed(0)}%)`}
+                                  outerRadius={80}
+                                  fill="#8884d8"
+                                  dataKey="value"
+                                >
+                                  {typoDistributionData.map((entry, index) => (
+                                    <Cell key={`cell-${index}`} fill={PIE_COLORS[index % PIE_COLORS.length]} />
+                                  ))}
+                                </Pie>
+                                <Tooltip 
+                                  contentStyle={{ fontSize: '11px', fontFamily: 'sans-serif', borderRadius: '4px' }} 
+                                  formatter={(value: any) => [`${value} kali`, 'Frekuensi']}
+                                />
+                              </PieChart>
+                            </ResponsiveContainer>
+                          </div>
+                        </div>
+
+                        {/* Detail List / Legend Card */}
+                        <div className="bg-white p-4 border border-gray-150 rounded-sm flex flex-col justify-between">
+                          <div>
+                            <h4 className="text-xs font-sans font-black uppercase tracking-wider text-[#1a1a1a] mb-1">
+                              Detail Frekuensi Kesalahan Kata
+                            </h4>
+                            <p className="text-[10px] text-gray-400 font-serif mb-4">
+                              Daftar kata tidak baku beserta frekuensi kemunculannya dari {allEvaluations.length} sesi pemeriksaan.
+                            </p>
+                          </div>
+                          <div className="space-y-3 flex-1 overflow-y-auto max-h-[220px] pr-1 font-sans">
+                            {typoDistributionData.map((entry, index) => {
+                              const total = typoDistributionData.reduce((sum, item) => sum + item.value, 0);
+                              const percent = total > 0 ? ((entry.value / total) * 100).toFixed(1) : '0.0';
+                              return (
+                                <div key={index} className="flex justify-between items-center border-b border-gray-50 pb-2">
+                                  <div className="flex items-center gap-2">
+                                    <div 
+                                      className="w-3 h-3 rounded-full shrink-0 animate-pulse" 
+                                      style={{ backgroundColor: PIE_COLORS[index % PIE_COLORS.length] }}
+                                    />
+                                    <span className="font-mono text-xs font-bold text-gray-700 uppercase bg-gray-50 px-1.5 py-0.5 rounded border border-gray-100">
+                                      {entry.name}
+                                    </span>
+                                  </div>
+                                  <div className="flex items-center gap-4 text-right">
+                                    <span className="font-mono text-xs text-gray-400">{entry.value} kali</span>
+                                    <span className="font-mono text-xs font-black text-gray-800 w-12">{percent}%</span>
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="bg-gray-50 p-6 border border-gray-200 rounded-sm text-center font-serif italic text-xs text-gray-400">
+                        Tidak ada statistik typos yang dapat divisualisasikan. Masukkan teks di pemeriksa terlebih dahulu agar log terekam di sini!
+                      </div>
+                    )}
+
+                    {/* DATE & TIME FILTER FOR GRAPHICAL ANALYTICS */}
+                    <div className="bg-white p-4 border border-gray-250 rounded-sm space-y-3 shadow-sm">
+                      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-gray-100 pb-3">
+                        <div>
+                          <h4 className="text-xs font-sans font-black uppercase tracking-wider text-[#1a1a1a]">
+                            Penyaringan Berdasarkan Tanggal &amp; Waktu Grafik
+                          </h4>
+                          <p className="text-[10px] text-gray-400 font-serif">
+                            Batasi periode data grafik pencarian kamus dan log pemeriksaan teks secara spesifik dan presisi.
+                          </p>
+                        </div>
+                        
+                        {/* Quick preset triggers */}
+                        <div className="flex flex-wrap items-center gap-1.5 text-[9px] font-mono">
+                          <span className="text-gray-400 font-sans font-bold uppercase mr-1">Preset:</span>
+                          <button
+                            onClick={() => {
+                              const today = getLocalDateString();
+                              setChartStartDate(today);
+                              setChartStartTime('00:00');
+                              setChartEndDate(today);
+                              setChartEndTime('23:59');
+                            }}
+                            className="px-2 py-1 bg-gray-50 border border-gray-150 rounded hover:border-[#1a1a1a] dark:hover:border-white transition-all font-bold"
+                          >
+                            Hari Ini
+                          </button>
+                          <button
+                            onClick={() => {
+                              const end = new Date();
+                              const start = new Date();
+                              start.setDate(end.getDate() - 7);
+                              
+                              setChartStartDate(getLocalDateString(start));
+                              setChartStartTime('00:00');
+                              setChartEndDate(getLocalDateString(end));
+                              setChartEndTime('23:59');
+                            }}
+                            className="px-2 py-1 bg-gray-50 border border-gray-150 rounded hover:border-[#1a1a1a] dark:hover:border-white transition-all font-bold"
+                          >
+                            7 Hari Terakhir
+                          </button>
+                          <button
+                            onClick={() => {
+                              const end = new Date();
+                              const start = new Date();
+                              start.setDate(end.getDate() - 30);
+                              
+                              setChartStartDate(getLocalDateString(start));
+                              setChartStartTime('00:00');
+                              setChartEndDate(getLocalDateString(end));
+                              setChartEndTime('23:59');
+                            }}
+                            className="px-2 py-1 bg-gray-50 border border-gray-150 rounded hover:border-[#1a1a1a] dark:hover:border-white transition-all font-bold"
+                          >
+                            30 Hari Terakhir
+                          </button>
+                          <button
+                            onClick={() => {
+                              setChartStartDate('');
+                              setChartStartTime('00:00');
+                              setChartEndDate('');
+                              setChartEndTime('23:59');
+                            }}
+                            className="px-2 py-1 bg-red-50 border border-red-150 text-red-700 hover:bg-red-100 dark:bg-red-950/20 dark:border-red-900/40 dark:text-red-400 rounded transition-all font-bold"
+                          >
+                            Reset
+                          </button>
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-1 md:grid-cols-4 gap-4 items-end">
+                        <div>
+                          <label className="block text-[9px] font-sans font-bold uppercase tracking-widest text-[#1a1a1a] mb-1">
+                            Tanggal Mulai
+                          </label>
+                          <input
+                            type="date"
+                            value={chartStartDate}
+                            onChange={(e) => setChartStartDate(e.target.value)}
+                            className="w-full text-xs px-2.5 py-1.5 border border-gray-200 focus:border-[#1a1a1a] dark:focus:border-white focus:outline-none bg-white text-gray-800 rounded-sm font-mono"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-[9px] font-sans font-bold uppercase tracking-widest text-[#1a1a1a] mb-1">
+                            Jam Mulai
+                          </label>
+                          <input
+                            type="time"
+                            value={chartStartTime}
+                            onChange={(e) => setChartStartTime(e.target.value)}
+                            className="w-full text-xs px-2.5 py-1.5 border border-gray-200 focus:border-[#1a1a1a] dark:focus:border-white focus:outline-none bg-white text-gray-800 rounded-sm font-mono"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-[9px] font-sans font-bold uppercase tracking-widest text-[#1a1a1a] mb-1">
+                            Tanggal Selesai
+                          </label>
+                          <input
+                            type="date"
+                            value={chartEndDate}
+                            onChange={(e) => setChartEndDate(e.target.value)}
+                            className="w-full text-xs px-2.5 py-1.5 border border-gray-200 focus:border-[#1a1a1a] dark:focus:border-white focus:outline-none bg-white text-gray-800 rounded-sm font-mono"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-[9px] font-sans font-bold uppercase tracking-widest text-[#1a1a1a] mb-1">
+                            Jam Selesai
+                          </label>
+                          <input
+                            type="time"
+                            value={chartEndTime}
+                            onChange={(e) => setChartEndTime(e.target.value)}
+                            className="w-full text-xs px-2.5 py-1.5 border border-gray-200 focus:border-[#1a1a1a] dark:focus:border-white focus:outline-none bg-white text-gray-800 rounded-sm font-mono"
+                          />
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* DUAL DAILY CHARTS: SEARCHES & TYPO LOGS */}
+                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 bg-gray-50 p-4 border border-gray-200 rounded-sm">
+                      {/* Daily Searches Chart */}
+                      <div id="daily-searches-chart" className="bg-white p-4 border border-gray-150 rounded-sm flex flex-col justify-between relative">
+                        <div className="mb-4 flex items-start justify-between gap-2">
+                          <div>
+                            <h4 className="text-xs font-sans font-black uppercase tracking-wider text-[#1a1a1a] mb-1">
+                              Grafik Jumlah Pencarian Kamus Harian
+                            </h4>
+                            <p className="text-[10px] text-gray-400 font-serif">
+                              Akumulasi volume kueri istilah yang dicari dalam Kamus Pintar tiap hari.
+                            </p>
+                          </div>
+                          {filteredDailySearches.length > 0 && (
+                            <button
+                              onClick={() => downloadChartAsPng('daily-searches-chart', 'grafik-pencarian-harian.png')}
+                              className="py-1 px-2 border border-gray-200 text-gray-500 hover:border-[#1a1a1a] hover:text-[#1a1a1a] dark:text-gray-400 dark:border-gray-700 dark:hover:border-white dark:hover:text-white rounded-sm text-[9px] font-mono flex items-center gap-1 transition-all"
+                              title="Download Grafik PNG"
+                            >
+                              <Download size={10} />
+                              <span>PNG</span>
+                            </button>
+                          )}
+                        </div>
+                        {filteredDailySearches.length > 0 ? (
+                          <div className="h-[220px] w-full font-mono text-[10px] min-h-[220px]">
+                            <ResponsiveContainer width="100%" height="100%">
+                              <BarChart data={filteredDailySearches}>
+                                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f3f4f6" />
+                                <XAxis dataKey="date" stroke="#9ca3af" fontSize={10} />
+                                <YAxis stroke="#9ca3af" fontSize={10} allowDecimals={false} />
+                                <Tooltip
+                                  contentStyle={{ fontSize: '11px', fontFamily: 'sans-serif', borderRadius: '4px' }}
+                                  formatter={(value: any) => [`${value} kali`, 'Pencarian']}
+                                />
+                                <Bar dataKey="count" fill="#1a1a1a" radius={[2, 2, 0, 0]} />
+                              </BarChart>
+                            </ResponsiveContainer>
+                          </div>
                         ) : (
-                          allEvaluations.map((ev, idx) => (
-                            <tr key={idx} className="hover:bg-[#fdfbf7]/50 transition-colors">
-                              <td className="px-6 py-4 font-mono font-bold text-gray-750">{ev.email}</td>
-                              <td className="px-6 py-4 font-mono">{ev.totalWords || 0} kata</td>
-                              <td className="px-6 py-4 font-mono text-red-500 font-bold">{ev.typosCount || 0} kata</td>
-                              <td className="px-6 py-4 font-mono text-emerald-600 font-bold">{ev.precision || '100%'}</td>
-                              <td className="px-6 py-4 font-serif text-gray-500 truncate max-w-[150px]" title={ev.inputText}>{ev.inputText}</td>
-                              <td className="px-6 py-4 text-gray-400 font-mono">
-                                {ev.timestamp ? new Date(ev.timestamp).toLocaleString("id-ID") : "-"}
+                          <div className="h-[220px] flex items-center justify-center font-serif italic text-xs text-gray-400 bg-gray-50/50 rounded-sm border border-dashed border-gray-200">
+                            Tidak ada aktivitas pencarian terekam pada filter rentang waktu ini.
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Daily Typo Checker Evaluations Chart */}
+                      <div id="daily-evaluations-chart" className="bg-white p-4 border border-gray-150 rounded-sm flex flex-col justify-between relative">
+                        <div className="mb-4 flex items-start justify-between gap-2">
+                          <div>
+                            <h4 className="text-xs font-sans font-black uppercase tracking-wider text-[#1a1a1a] mb-1">
+                              Grafik Pemeriksaan Typo KBBI Harian
+                            </h4>
+                            <p className="text-[10px] text-gray-400 font-serif">
+                              Jumlah pengujian naskah/teks yang diperiksa kualitas keselarasan typo KBBI per hari.
+                            </p>
+                          </div>
+                          {filteredDailyEvaluations.length > 0 && (
+                            <button
+                              onClick={() => downloadChartAsPng('daily-evaluations-chart', 'grafik-pemeriksaan-typo.png')}
+                              className="py-1 px-2 border border-gray-200 text-gray-500 hover:border-[#1a1a1a] hover:text-[#1a1a1a] dark:text-gray-400 dark:border-gray-700 dark:hover:border-white dark:hover:text-white rounded-sm text-[9px] font-mono flex items-center gap-1 transition-all"
+                              title="Download Grafik PNG"
+                            >
+                              <Download size={10} />
+                              <span>PNG</span>
+                            </button>
+                          )}
+                        </div>
+                        {filteredDailyEvaluations.length > 0 ? (
+                          <div className="h-[220px] w-full font-mono text-[10px] min-h-[220px]">
+                            <ResponsiveContainer width="100%" height="100%">
+                              <BarChart data={filteredDailyEvaluations}>
+                                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f3f4f6" />
+                                <XAxis dataKey="date" stroke="#9ca3af" fontSize={10} />
+                                <YAxis stroke="#9ca3af" fontSize={10} allowDecimals={false} />
+                                <Tooltip
+                                  contentStyle={{ fontSize: '11px', fontFamily: 'sans-serif', borderRadius: '4px' }}
+                                  formatter={(value: any) => [`${value} kali`, 'Pemeriksaan']}
+                                />
+                                <Bar dataKey="count" fill="#3b82f6" radius={[2, 2, 0, 0]} />
+                              </BarChart>
+                            </ResponsiveContainer>
+                          </div>
+                        ) : (
+                          <div className="h-[220px] flex items-center justify-center font-serif italic text-xs text-gray-400 bg-gray-50/50 rounded-sm border border-dashed border-gray-200">
+                            Tidak ada pemeriksaan teks yang dilakukan pada filter rentang waktu ini.
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="overflow-x-auto border border-gray-200 rounded-sm">
+                      <table className="w-full text-left font-sans text-xs">
+                        <thead>
+                          <tr className="bg-gray-50 border-b border-gray-200 text-gray-500 uppercase tracking-widest text-[9px] font-black font-sans">
+                            <th className="px-6 py-4">Email</th>
+                            <th className="px-6 py-4">Total Kata</th>
+                            <th className="px-6 py-4">Typo Terdeteksi</th>
+                            <th className="px-6 py-4">Skor Presisi</th>
+                            <th className="px-6 py-4">Hasil Teks</th>
+                            <th className="px-6 py-4">Waktu Check</th>
+                            <th className="px-6 py-4 text-right">Aksi</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-gray-150">
+                          {allEvaluations.length === 0 ? (
+                            <tr>
+                              <td colSpan={7} className="px-6 py-12 text-center text-gray-400 font-serif italic text-sm">
+                                Belum ada riwayat hasil pemeriksaan terdeteksi.
                               </td>
                             </tr>
-                          ))
-                        )}
-                      </tbody>
-                    </table>
+                          ) : (
+                            allEvaluations.map((ev, idx) => (
+                              <tr key={ev.id || idx} className="hover:bg-[#fdfbf7]/50 transition-colors">
+                                <td className="px-6 py-4 font-mono font-bold text-gray-750">{ev.email}</td>
+                                <td className="px-6 py-4 font-mono">{ev.totalWords || 0} kata</td>
+                                <td className="px-6 py-4 font-mono text-red-500 font-bold">{ev.typosCount || 0} kata</td>
+                                <td className="px-6 py-4 font-mono text-emerald-600 font-bold">{ev.precision || '100%'}</td>
+                                <td className="px-6 py-4 font-serif text-gray-500 truncate max-w-[150px]" title={ev.inputText}>{ev.inputText}</td>
+                                <td className="px-6 py-4 text-gray-400 font-mono">
+                                  {ev.timestamp ? new Date(ev.timestamp).toLocaleString("id-ID") : "-"}
+                                </td>
+                                <td className="px-6 py-4 text-right">
+                                  <button
+                                    onClick={() => handleDeleteEvaluationLog(ev.id)}
+                                    title="Hapus log pemeriksaan ini"
+                                    className="p-1 px-2.5 text-red-600 hover:bg-red-50 hover:text-red-800 rounded transition-colors text-[9px] uppercase font-sans font-black tracking-widest inline-flex items-center gap-1 border border-transparent hover:border-red-100"
+                                  >
+                                    <Trash2 size={11} /> Hapus
+                                  </button>
+                                </td>
+                              </tr>
+                            ))
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
                   </div>
-                </div>
-              )}
+                );
+              })()}
 
               {/* PENGATURAN SALURAN GOPAY / QRIS */}
               {selectedAdminSubTab === 'pengaturan_bayar' && (
@@ -2664,6 +3807,177 @@ function MainApp() {
                             </tr>
                           ))
                         )}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+
+              {/* BASIS DATA TYPO (KBBI) */}
+              {selectedAdminSubTab === 'kelola_typo' && (
+                <div className="space-y-6 animate-in fade-in duration-300">
+                  <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 border-b border-gray-100 pb-4">
+                    <div>
+                      <h3 className="text-xs font-sans font-black uppercase tracking-widest text-[#1a1a1a]">Manajemen Koreksi Typo KBBI</h3>
+                      <p className="text-[11px] text-gray-400 font-serif mt-1">
+                        Kelola data kesalahan penulisan (typo) tidak baku dan pasangkan dengan bentuk baku KBBI agar sistem pemeriksa dapat menyortir dan membetulkannya secara presisi.
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Operational Toolbar */}
+                  <div className="flex flex-col xl:flex-row justify-between items-stretch xl:items-center gap-4 bg-gray-50 p-4 border border-gray-200 rounded-sm">
+                    {/* Search bar inside the typos tab */}
+                    <div className="relative flex-1 max-w-md">
+                      <Search className="absolute left-3 top-2.5 h-4 w-4 text-gray-400" />
+                      <input
+                        type="text"
+                        value={typoSearchQuery}
+                        onChange={(e) => setTypoSearchQuery(e.target.value)}
+                        placeholder="Cari kata typo atau kata baku..."
+                        className="w-full text-xs pl-9 pr-4 py-2 border border-gray-200 focus:border-[#1a1a1a] focus:outline-none bg-white text-gray-800 rounded-sm"
+                      />
+                    </div>
+
+                    {/* Action buttons list */}
+                    <div className="flex flex-wrap items-center gap-2">
+                      <button
+                        onClick={() => {
+                          setTypoFormMode('add');
+                          setTypoFormFields({ typo: '', correction: '' });
+                          setShowTypoFormModal(true);
+                        }}
+                        className="px-4 py-2 bg-[#1a1a1a] hover:bg-gray-800 text-white rounded-sm text-[10px] uppercase font-sans font-black tracking-widest transition-all flex items-center gap-1.5"
+                      >
+                        <Plus size={12} /> Tambah Koreksi
+                      </button>
+
+                      <button
+                        onClick={downloadTyposExcel}
+                        className="px-3 py-2 border border-gray-200 hover:border-gray-300 hover:bg-white text-gray-700 bg-gray-50 rounded-sm text-[10px] uppercase font-sans font-black tracking-widest transition-all flex items-center gap-1.5"
+                        title="Unduh semua data sebagai file XLSX / Excel"
+                      >
+                        <Download size={12} /> Unduh Excel
+                      </button>
+
+                      <label className="px-3 py-2 border border-gray-200 hover:border-gray-300 hover:bg-white text-gray-700 bg-gray-50 rounded-sm text-[10px] uppercase font-sans font-black tracking-widest transition-all flex items-center gap-1.5 cursor-pointer">
+                        <Upload size={12} /> Unggah Excel
+                        <input
+                          type="file"
+                          accept=".xlsx, .xls"
+                          onChange={handleTypoFileUpload}
+                          className="hidden"
+                        />
+                      </label>
+
+                      <button
+                        onClick={seedTyposCollection}
+                        disabled={isSeedingTypos}
+                        className="px-3 py-2 bg-amber-600 hover:bg-amber-700 active:bg-amber-800 text-white rounded-sm text-[10px] uppercase font-sans font-black tracking-widest transition-all flex items-center gap-1.5 disabled:opacity-50"
+                        title="Impor 500+ data contoh typo bawaan KBBI standard untuk melengkapi database"
+                      >
+                        {isSeedingTypos ? (
+                          <>
+                            <Loader2 size={12} className="animate-spin" /> Sedang Proses...
+                          </>
+                        ) : (
+                          <>
+                            <RefreshCw size={12} /> Impor 500+ Contoh Typo Awal
+                          </>
+                        )}
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Typo List Table */}
+                  <div className="overflow-x-auto border border-gray-200 rounded-sm font-sans max-h-[500px]">
+                    <table className="w-full text-left font-sans text-xs">
+                      <thead>
+                        <tr className="bg-gray-50 border-b border-gray-200 text-gray-500 uppercase tracking-widest text-[9px] font-black sticky top-0 z-10">
+                          <th className="px-6 py-4">Kata Tidak Baku (Typo)</th>
+                          <th className="px-6 py-4">Koreksi Sesuai KBBI (Baku)</th>
+                          <th className="px-6 py-4">Waktu Pembaruan</th>
+                          <th className="px-6 py-4 text-right">Tindakan</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-150">
+                        {(() => {
+                          const scored = typos.map(t => {
+                            const scoreTypo = getFuzzyScore(t.typo, typoSearchQuery);
+                            const scoreCorrection = getFuzzyScore(t.correction, typoSearchQuery);
+                            const maxScore = Math.max(scoreTypo, scoreCorrection);
+                            return { entry: t, score: maxScore };
+                          });
+
+                          // Filter out non-matching (score === 0)
+                          const filteredScored = scored.filter(item => item.score > 0);
+
+                          // Sort by score descending if search query is active
+                          if (typoSearchQuery.trim()) {
+                            filteredScored.sort((a, b) => b.score - a.score);
+                          }
+
+                          if (filteredScored.length === 0) {
+                            return (
+                              <tr>
+                                <td colSpan={4} className="px-6 py-12 text-center text-gray-400 font-serif italic text-sm">
+                                  {typos.length === 0 
+                                    ? 'Basis data masih kosong. Silakan unggah Excel atau klik tombol "Impor 500+ Contoh Typo Awal" di atas!' 
+                                    : 'Tidak ada kata typo yang cocok dengan pencarian.'}
+                                </td>
+                              </tr>
+                            );
+                          }
+
+                          return filteredScored.map(({ entry, score }, idx) => (
+                            <tr key={entry.typo + idx} className="hover:bg-gray-50/55 transition-colors">
+                              <td className="px-6 py-3">
+                                <span className="inline-flex items-center px-2 py-0.5 rounded bg-red-50 text-red-700 font-bold font-mono border border-red-100">
+                                  {entry.typo}
+                                </span>
+                              </td>
+                              <td className="px-6 py-3">
+                                <div className="flex items-center gap-1.5 flex-wrap">
+                                  <span className="inline-flex items-center px-2 py-0.5 rounded bg-green-50 text-green-800 font-bold font-mono border border-green-100">
+                                    {entry.correction}
+                                  </span>
+                                  {typoSearchQuery.trim() && score < 90 && score > 0 && (
+                                    <span className="text-[8px] font-sans font-black text-amber-700 bg-amber-50 px-1 py-0.5 rounded border border-amber-100 uppercase tracking-widest leading-none">
+                                      Fuzzy: {score}% mirip
+                                    </span>
+                                  )}
+                                </div>
+                              </td>
+                              <td className="px-6 py-3 text-gray-400 font-mono text-[10px]">
+                                {entry.updatedAt ? new Date(entry.updatedAt).toLocaleString("id-ID") : "-"}
+                              </td>
+                              <td className="px-6 py-3 text-right space-x-1">
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setTypoFormMode('edit');
+                                    setTypoFormFields({
+                                      typo: entry.typo,
+                                      correction: entry.correction,
+                                      originalTypo: entry.typo
+                                    });
+                                    setShowTypoFormModal(true);
+                                  }}
+                                  className="text-[10px] uppercase font-black font-sans tracking-wide text-gray-700 hover:text-[#1a1a1a] hover:underline px-2 py-1"
+                                >
+                                  Ubah
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => handleDeleteTypo(entry.typo)}
+                                  className="text-[10px] uppercase font-black font-sans tracking-wide text-red-650 hover:text-red-700 hover:underline px-2 py-1"
+                                >
+                                  Hapus
+                                </button>
+                              </td>
+                            </tr>
+                          ));
+                        })()}
                       </tbody>
                     </table>
                   </div>
@@ -3165,21 +4479,114 @@ function MainApp() {
         </div>
       )}
 
-      {/* Status Toast Notification Dashboard */}
-      {statusMessage && (
-        <div className="fixed bottom-24 left-1/2 -translate-x-1/2 z-[100] w-[90%] max-w-sm animate-in fade-in slide-in-from-bottom-4 duration-300">
-          <div className={`shadow-2xl border px-6 py-4 rounded-xl flex items-center gap-4 ${
-            statusType === 'error' ? 'bg-red-50 border-red-200 text-red-700' :
-            statusType === 'success' ? 'bg-amber-50 border-amber-200 text-amber-700' :
-            'bg-[#1a1a1a] text-white border-white/10'
-          }`}>
-            <div className={`w-2 h-2 rounded-full shrink-0 ${
-              statusType === 'success' ? 'bg-amber-500' : statusType === 'error' ? 'bg-red-500' : 'bg-blue-400'
-            }`} />
-            <p className="text-xs font-bold font-sans uppercase tracking-widest">{statusMessage}</p>
-          </div>
+      {/* Manual Typo Add/Edit Form Modal */}
+      {showTypoFormModal && (
+        <div id="typo-form-modal" className="fixed inset-0 z-[60] flex items-center justify-center p-4 animate-in fade-in duration-200">
+          <div 
+            onClick={() => setShowTypoFormModal(false)}
+            className="absolute inset-0 bg-[#1a1a1a]/40 backdrop-blur-sm"
+          />
+          <form 
+            onSubmit={handleSaveManualTypo}
+            className="relative bg-white w-full max-w-sm p-8 shadow-2xl border border-[#1a1a1a] rounded-sm space-y-6"
+          >
+            <div className="flex justify-between items-center border-b border-gray-150 pb-4">
+              <h3 className="text-sm font-sans font-black uppercase tracking-widest text-[#1a1a1a]">
+                {typoFormMode === 'add' ? 'Tambah Koreksi Typo Baru' : 'Ubah Koreksi Typo'}
+              </h3>
+              <button 
+                type="button" 
+                onClick={() => setShowTypoFormModal(false)} 
+                className="text-gray-400 hover:text-[#1a1a1a]"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="space-y-4">
+              <div>
+                <label className="block text-[10px] font-sans font-bold uppercase tracking-widest mb-1 opacity-60">Kata Typo / Tidak Baku</label>
+                <input
+                  type="text"
+                  required
+                  value={typoFormFields.typo}
+                  onChange={(e) => setTypoFormFields(prev => ({ ...prev, typo: e.target.value }))}
+                  placeholder="Misal: apotik"
+                  disabled={typoFormMode === 'edit'}
+                  className="w-full text-xs font-mono border border-gray-200 focus:border-[#1a1a1a] focus:outline-none px-3 py-2 bg-white text-gray-800 rounded-sm disabled:opacity-50"
+                />
+              </div>
+
+              <div>
+                <label className="block text-[10px] font-sans font-bold uppercase tracking-widest mb-1 opacity-60">Koreksi Sesuai KBBI (Baku)</label>
+                <input
+                  type="text"
+                  required
+                  value={typoFormFields.correction}
+                  onChange={(e) => setTypoFormFields(prev => ({ ...prev, correction: e.target.value }))}
+                  placeholder="Misal: apotek"
+                  className="w-full text-xs font-mono border border-gray-200 focus:border-[#1a1a1a] focus:outline-none px-3 py-2 bg-white text-gray-800 rounded-sm"
+                />
+              </div>
+
+              {/* Fuzzy Suggestions Panel */}
+              {adminFuzzySuggestions.length > 0 && (
+                <div className="bg-amber-50/60 border border-amber-200/80 rounded-sm p-3.5 space-y-2 animate-in fade-in duration-200">
+                  <span className="block text-[9px] font-sans font-black uppercase tracking-widest text-amber-800">
+                    Saran & Deteksi Duplikasi (Fuzzy Search):
+                  </span>
+                  <div className="space-y-1.5 max-h-[140px] overflow-y-auto pr-1">
+                    {adminFuzzySuggestions.map((suggestion, idx) => (
+                      <button
+                        key={idx}
+                        type="button"
+                        onClick={() => applyFuzzySuggestion(suggestion)}
+                        className={`w-full text-left text-[11px] p-2 rounded transition-all flex flex-col gap-1 border ${
+                          suggestion.type === 'warning_duplicate' 
+                            ? 'bg-red-50/70 border-red-200 hover:bg-red-100/80 text-red-800 font-medium' 
+                            : 'bg-white border-dashed border-gray-200 hover:border-[#1a1a1a] hover:bg-gray-50 text-gray-700'
+                        }`}
+                      >
+                        <span className="font-serif leading-snug">{suggestion.message}</span>
+                        <span className="text-[9px] font-mono opacity-60 uppercase tracking-wider block">
+                          Klik untuk menerapkan koreksi otomatis → ({suggestion.typo} → {suggestion.correction})
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <div className="flex gap-4 border-t border-gray-150 pt-4">
+              <button
+                type="button"
+                onClick={() => setShowTypoFormModal(false)}
+                className="w-1/2 border border-gray-200 hover:bg-gray-50 py-2.5 font-sans font-bold uppercase tracking-widest text-[9px] transition-all rounded-sm text-gray-500"
+              >
+                Batal
+              </button>
+              <button
+                type="submit"
+                className="w-1/2 bg-[#1a1a1a] hover:bg-gray-800 text-white py-2.5 font-sans font-bold uppercase tracking-widest text-[9px] transition-all rounded-sm"
+              >
+                {typoFormMode === 'add' ? 'Tambah Koreksi' : 'Simpan Perubahan'}
+              </button>
+            </div>
+          </form>
         </div>
       )}
+
+      {/* Custom Stackable Toast Container */}
+      <div className="fixed bottom-6 right-6 z-[100] flex flex-col gap-3 w-[90%] max-w-sm pointer-events-none">
+        <AnimatePresence mode="popLayout">
+          {toasts.map(toast => (
+            <div key={toast.id} className="pointer-events-auto">
+              <ToastItem toast={toast} onClose={removeToast} />
+            </div>
+          ))}
+        </AnimatePresence>
+      </div>
 
       {/* Decorative BG element */}
       <div className="fixed top-0 right-0 p-8 pointer-events-none opacity-[0.03] overflow-hidden select-none">

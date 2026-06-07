@@ -1,5 +1,16 @@
 {
   "entities": {
+    "TypoCorrection": {
+      "title": "Typo Correction Map",
+      "description": "A mapping from an incorrect (typanese) word to its correct standard KBBI form.",
+      "type": "object",
+      "properties": {
+        "typo": { "type": "string", "description": "The incorrect/common typo word" },
+        "correction": { "type": "string", "description": "The correct KBBI word form" },
+        "updatedAt": { "type": "string", "format": "date-time", "description": "Last modified timestamp" }
+      },
+      "required": ["typo", "correction", "updatedAt"]
+    },
     "Word": {
       "title": "Word Definition",
       "description": "A single word entry with its category, definition, and usage examples.",
@@ -128,6 +139,10 @@
     "/words/{wordId}": {
       "schema": "Word",
       "description": "Collection of dictionary words."
+    },
+    "/typos/{typoId}": {
+      "schema": "TypoCorrection",
+      "description": "Collection of typo corrections mapping incorrect words to correct KBBI forms."
     },
     "/stats/{statId}": {
       "schema": "AppStats",
