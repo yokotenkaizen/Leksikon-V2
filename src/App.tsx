@@ -387,7 +387,13 @@ function MainApp() {
   const [typoSearchQuery, setTypoSearchQuery] = useState('');
   const [showTypoFormModal, setShowTypoFormModal] = useState(false);
   const [typoFormMode, setTypoFormMode] = useState<'add' | 'edit'>('add');
-  const [typoFormFields, setTypoFormFields] = useState<{ typo: string; correction: string; originalTypo?: string }>({ typo: '', correction: '' });
+  const [typoFormFields, setTypoFormFields] = useState<{ typo: string; correction: string; category?: string; originalTypo?: string }>({ typo: '', correction: '', category: 'Pemeriksa Typo' });
+  const [typoVisibleCount, setTypoVisibleCount] = useState<number>(50);
+  const [typoCategoryFilter, setTypoCategoryFilter] = useState<string>('Semua Kategori');
+
+  useEffect(() => {
+    setTypoVisibleCount(50);
+  }, [typoSearchQuery, typoCategoryFilter, selectedAdminSubTab]);
 
   // Calculate top typos distribution from allEvaluations dynamically
   const typoDistributionData = useMemo(() => {
@@ -1991,6 +1997,7 @@ function MainApp() {
         await setDoc(doc(db, "typos", typoId), {
           typo: t.typo.trim(),
           correction: t.correction.trim(),
+          category: t.category || "Pemeriksa Typo",
           updatedAt: new Date().toISOString()
         });
         count++;
@@ -2015,10 +2022,10 @@ function MainApp() {
       ["DATABASE KOREKSI TYPO KBBI"],
       ["Waktu Diunduh:", now.toLocaleString("id-ID")],
       [],
-      ["Kata Typo", "Koreksi KBBI"]
+      ["Kata Typo", "Koreksi KBBI", "Kategori"]
     ];
     typos.forEach(t => {
-      exportData.push([t.typo, t.correction]);
+      exportData.push([t.typo, t.correction, t.category || "Pemeriksa Typo"]);
     });
 
     const ws = XLSX.utils.aoa_to_sheet(exportData);
@@ -2056,19 +2063,21 @@ function MainApp() {
         const ws = wb.Sheets[wsname];
         const data = XLSX.utils.sheet_to_json(ws, { header: 1 }) as any[][];
 
-        // A: Kata Typo, B: Koreksi KBBI
+        // A: Kata Typo, B: Koreksi KBBI, C: Kategori (optional)
         const validRows = data.slice(1).filter(row => row[0] && row[1]); 
         
         let successCount = 0;
         for (const row of validRows) {
           const typoStr = String(row[0]).trim();
           const correctionStr = String(row[1]).trim();
+          const categoryStr = row[2] ? String(row[2]).trim() : "Pemeriksa Typo";
           
           if (typoStr.toLowerCase() === correctionStr.toLowerCase()) continue;
 
           await setDoc(doc(db, 'typos', typoStr.toLowerCase()), {
             typo: typoStr,
             correction: correctionStr,
+            category: categoryStr,
             updatedAt: new Date().toISOString()
           });
           successCount++;
@@ -2077,7 +2086,7 @@ function MainApp() {
         showStatus(`Berhasil mengimpor ${successCount} data typo ke database.`, "success");
       } catch (err: any) {
         console.error(err);
-        showStatus("Gagal membaca file Excel typo. Format kolom harus: Kata Typo, Koreksi KBBI", "error");
+        showStatus("Gagal membaca file Excel typo. Format kolom: Kata Typo, Koreksi KBBI, [Kategori (Opsional)]", "error");
       } finally {
         if (e.target) e.target.value = '';
       }
@@ -2125,12 +2134,13 @@ function MainApp() {
       await setDoc(doc(db, 'typos', typoId), {
         typo: tInput,
         correction: cInput,
+        category: typoFormFields.category || "Pemeriksa Typo",
         updatedAt: new Date().toISOString()
       });
 
       showStatus(typoFormMode === 'add' ? "Berhasil menambahkan typo!" : "Berhasil memperbarui typo!", "success");
       setShowTypoFormModal(false);
-      setTypoFormFields({ typo: '', correction: '' });
+      setTypoFormFields({ typo: '', correction: '', category: 'Pemeriksa Typo' });
     } catch (err: any) {
       console.error(err);
       showStatus(`Gagal menyimpan typo: ${err.message}`, "error");
@@ -3827,16 +3837,33 @@ function MainApp() {
 
                   {/* Operational Toolbar */}
                   <div className="flex flex-col xl:flex-row justify-between items-stretch xl:items-center gap-4 bg-gray-50 p-4 border border-gray-200 rounded-sm">
-                    {/* Search bar inside the typos tab */}
-                    <div className="relative flex-1 max-w-md">
-                      <Search className="absolute left-3 top-2.5 h-4 w-4 text-gray-400" />
-                      <input
-                        type="text"
-                        value={typoSearchQuery}
-                        onChange={(e) => setTypoSearchQuery(e.target.value)}
-                        placeholder="Cari kata typo atau kata baku..."
-                        className="w-full text-xs pl-9 pr-4 py-2 border border-gray-200 focus:border-[#1a1a1a] focus:outline-none bg-white text-gray-800 rounded-sm"
-                      />
+                    {/* Search bar and Category Filter inside the typos tab */}
+                    <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 flex-1 max-w-xl">
+                      <div className="relative flex-1">
+                        <Search className="absolute left-3 top-2.5 h-4 w-4 text-gray-400" />
+                        <input
+                          type="text"
+                          value={typoSearchQuery}
+                          onChange={(e) => setTypoSearchQuery(e.target.value)}
+                          placeholder="Cari kata typo atau kata baku..."
+                          className="w-full text-xs pl-9 pr-4 py-2 border border-gray-200 focus:border-[#1a1a1a] focus:outline-none bg-white text-gray-800 rounded-sm"
+                        />
+                      </div>
+                      
+                      <div className="w-full sm:w-48">
+                        <select
+                          value={typoCategoryFilter}
+                          onChange={(e) => setTypoCategoryFilter(e.target.value)}
+                          className="w-full text-xs px-3 py-2 border border-gray-200 focus:border-[#1a1a1a] focus:outline-none bg-white text-gray-800 rounded-sm font-sans cursor-pointer"
+                        >
+                          <option value="Semua Kategori">📚 Semua Kategori</option>
+                          <option value="Kata Kerja">🔨 Kata Kerja</option>
+                          <option value="Kata Benda">📦 Kata Benda</option>
+                          <option value="Nama Tempat">📍 Nama Tempat</option>
+                          <option value="Pemeriksa Typo">🔍 Pemeriksa Typo</option>
+                          <option value="Lainnya">💡 Lainnya</option>
+                        </select>
+                      </div>
                     </div>
 
                     {/* Action buttons list */}
@@ -3844,7 +3871,7 @@ function MainApp() {
                       <button
                         onClick={() => {
                           setTypoFormMode('add');
-                          setTypoFormFields({ typo: '', correction: '' });
+                          setTypoFormFields({ typo: '', correction: '', category: 'Pemeriksa Typo' });
                           setShowTypoFormModal(true);
                         }}
                         className="px-4 py-2 bg-[#1a1a1a] hover:bg-gray-800 text-white rounded-sm text-[10px] uppercase font-sans font-black tracking-widest transition-all flex items-center gap-1.5"
@@ -3896,13 +3923,20 @@ function MainApp() {
                         <tr className="bg-gray-50 border-b border-gray-200 text-gray-500 uppercase tracking-widest text-[9px] font-black sticky top-0 z-10">
                           <th className="px-6 py-4">Kata Tidak Baku (Typo)</th>
                           <th className="px-6 py-4">Koreksi Sesuai KBBI (Baku)</th>
+                          <th className="px-6 py-4">Kategori</th>
                           <th className="px-6 py-4">Waktu Pembaruan</th>
                           <th className="px-6 py-4 text-right">Tindakan</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-gray-150">
                         {(() => {
-                          const scored = typos.map(t => {
+                          const filtered = typos.filter(t => {
+                            if (typoCategoryFilter === 'Semua Kategori') return true;
+                            const cat = t.category || 'Pemeriksa Typo';
+                            return cat === typoCategoryFilter;
+                          });
+
+                          const scored = filtered.map(t => {
                             const scoreTypo = getFuzzyScore(t.typo, typoSearchQuery);
                             const scoreCorrection = getFuzzyScore(t.correction, typoSearchQuery);
                             const maxScore = Math.max(scoreTypo, scoreCorrection);
@@ -3920,16 +3954,18 @@ function MainApp() {
                           if (filteredScored.length === 0) {
                             return (
                               <tr>
-                                <td colSpan={4} className="px-6 py-12 text-center text-gray-400 font-serif italic text-sm">
+                                <td colSpan={5} className="px-6 py-12 text-center text-gray-400 font-serif italic text-sm">
                                   {typos.length === 0 
                                     ? 'Basis data masih kosong. Silakan unggah Excel atau klik tombol "Impor 500+ Contoh Typo Awal" di atas!' 
-                                    : 'Tidak ada kata typo yang cocok dengan pencarian.'}
+                                    : 'Tidak ada kata typo yang cocok dengan pencarian dan filter.'}
                                 </td>
                               </tr>
                             );
                           }
 
-                          return filteredScored.map(({ entry, score }, idx) => (
+                          const visibleScored = filteredScored.slice(0, typoVisibleCount);
+
+                          return visibleScored.map(({ entry, score }, idx) => (
                             <tr key={entry.typo + idx} className="hover:bg-gray-50/55 transition-colors">
                               <td className="px-6 py-3">
                                 <span className="inline-flex items-center px-2 py-0.5 rounded bg-red-50 text-red-700 font-bold font-mono border border-red-100">
@@ -3948,6 +3984,21 @@ function MainApp() {
                                   )}
                                 </div>
                               </td>
+                              <td className="px-6 py-3">
+                                <span className={`inline-flex items-center px-2 py-0.5 rounded text-[10px] font-sans font-bold capitalize border ${
+                                  entry.category === 'Kata Kerja' ? 'bg-amber-50 text-amber-800 border-amber-100' :
+                                  entry.category === 'Kata Benda' ? 'bg-blue-50 text-blue-800 border-blue-100' :
+                                  entry.category === 'Nama Tempat' ? 'bg-purple-50 text-purple-800 border-purple-100' :
+                                  entry.category === 'Lainnya' ? 'bg-teal-50 text-teal-800 border-teal-100' :
+                                  'bg-gray-50 text-gray-600 border-gray-150'
+                                }`}>
+                                  {entry.category === 'Kata Kerja' ? '🔨 ' :
+                                   entry.category === 'Kata Benda' ? '📦 ' :
+                                   entry.category === 'Nama Tempat' ? '📍 ' :
+                                   entry.category === 'Lainnya' ? '💡 ' : '🔍 '}
+                                  {entry.category || 'Pemeriksa Typo'}
+                                </span>
+                              </td>
                               <td className="px-6 py-3 text-gray-400 font-mono text-[10px]">
                                 {entry.updatedAt ? new Date(entry.updatedAt).toLocaleString("id-ID") : "-"}
                               </td>
@@ -3959,6 +4010,7 @@ function MainApp() {
                                     setTypoFormFields({
                                       typo: entry.typo,
                                       correction: entry.correction,
+                                      category: entry.category || 'Pemeriksa Typo',
                                       originalTypo: entry.typo
                                     });
                                     setShowTypoFormModal(true);
@@ -3981,6 +4033,51 @@ function MainApp() {
                       </tbody>
                     </table>
                   </div>
+
+                  {/* Lazy Loading load-more controls */}
+                  {(() => {
+                    const matchedCount = typos.filter(t => {
+                      if (typoCategoryFilter !== 'Semua Kategori' && (t.category || 'Pemeriksa Typo') !== typoCategoryFilter) {
+                        return false;
+                      }
+                      const scoreTypo = getFuzzyScore(t.typo, typoSearchQuery);
+                      const scoreCorrection = getFuzzyScore(t.correction, typoSearchQuery);
+                      return Math.max(scoreTypo, scoreCorrection) > 0;
+                    }).length;
+
+                    if (matchedCount > typoVisibleCount) {
+                      return (
+                        <div className="flex flex-col sm:flex-row items-center justify-between gap-4 bg-white p-4 border border-gray-200 rounded-sm mt-3 shadow-sm">
+                          <p className="text-[11px] font-mono text-gray-500">
+                            Menampilkan <strong className="text-gray-800">{typoVisibleCount}</strong> dari <strong className="text-gray-800">{matchedCount}</strong> entri typo terfilter.
+                          </p>
+                          <div className="flex gap-2">
+                            <button
+                              onClick={() => setTypoVisibleCount(prev => prev + 100)}
+                              className="px-4 py-2 border border-gray-250 hover:border-[#1a1a1a] bg-white text-gray-800 dark:bg-[#1e1c1a] dark:text-white hover:text-[#1a1a1a] transition-all rounded-sm text-[10px] font-sans font-black uppercase tracking-widest shrink-0 cursor-pointer"
+                            >
+                              Tampilkan 100 Lagi
+                            </button>
+                            <button
+                              onClick={() => setTypoVisibleCount(matchedCount)}
+                              className="px-4 py-2 bg-[#1a1a1a] hover:bg-gray-800 text-white transition-all rounded-sm text-[10px] font-sans font-black uppercase tracking-widest shrink-0 cursor-pointer"
+                            >
+                              Tampilkan Semua
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    } else if (matchedCount > 0) {
+                      return (
+                        <div className="bg-white p-3 border border-gray-200 border-t-0 rounded-b-sm text-center mt-3">
+                          <p className="text-[11px] font-mono text-gray-400">
+                            Menampilkan seluruh {matchedCount} entri typo yang cocok.
+                          </p>
+                        </div>
+                      );
+                    }
+                    return null;
+                  })()}
                 </div>
               )}
             </div>
@@ -4525,8 +4622,23 @@ function MainApp() {
                   value={typoFormFields.correction}
                   onChange={(e) => setTypoFormFields(prev => ({ ...prev, correction: e.target.value }))}
                   placeholder="Misal: apotek"
-                  className="w-full text-xs font-mono border border-gray-200 focus:border-[#1a1a1a] focus:outline-none px-3 py-2 bg-white text-gray-800 rounded-sm"
+                  className="w-full text-xs font-mono border border-gray-200 focus:border-[#1a1a1a] focus:outline-none px-3 py-2 bg-white text-gray-800 rounded-sm hover:border-[#131212]"
                 />
+              </div>
+
+              <div>
+                <label className="block text-[10px] font-sans font-bold uppercase tracking-widest mb-1 opacity-60">Kategori Kelompok</label>
+                <select
+                  value={typoFormFields.category || 'Pemeriksa Typo'}
+                  onChange={(e) => setTypoFormFields(prev => ({ ...prev, category: e.target.value }))}
+                  className="w-full text-xs border border-gray-200 focus:border-[#1a1a1a] focus:outline-none px-3 py-2 bg-white text-gray-800 rounded-sm font-sans cursor-pointer hover:border-[#131212]"
+                >
+                  <option value="Pemeriksa Typo">🔍 Pemeriksa Typo (Umum)</option>
+                  <option value="Kata Kerja">🔨 Kata Kerja</option>
+                  <option value="Kata Benda">📦 Kata Benda</option>
+                  <option value="Nama Tempat">📍 Nama Tempat</option>
+                  <option value="Lainnya">💡 Lainnya</option>
+                </select>
               </div>
 
               {/* Fuzzy Suggestions Panel */}

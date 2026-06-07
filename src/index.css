@@ -14,7 +14,9 @@
   transition: background-color 0.3s ease, color 0.3s ease;
 }
 
-.dark .bg-white {
+/* High readability overrides for off-white backgrounds */
+.dark .bg-white,
+.dark .bg-\[\#fdfbf7\] {
   background-color: #1e1c1a !important;
   color: #f4efe8 !important;
 }
@@ -23,10 +25,43 @@
   color: #f4efe8 !important;
 }
 
+/* Dynamic text colors */
+.dark .text-gray-900,
+.dark .text-gray-950,
+.dark .text-slate-800,
+.dark .text-slate-900 {
+  color: #ffffff !important;
+}
+
+.dark .text-gray-800,
+.dark .text-gray-700,
+.dark .text-gray-600 {
+  color: #e3dad0 !important;
+}
+
+.dark .text-gray-500,
+.dark .text-gray-400 {
+  color: #a89f95 !important;
+}
+
+.dark .text-gray-300 {
+  color: #c9bfb5 !important;
+}
+
+.dark .text-gray-200 {
+  color: #bfaea0 !important;
+}
+
+/* Borders and transitions */
+.dark .border-gray-250,
+.dark .border-gray-300 {
+  border-color: rgba(244, 239, 232, 0.15) !important;
+}
+
 .dark .border-gray-200,
 .dark .border-gray-150,
 .dark .border-gray-100 {
-  border-color: rgba(244, 239, 232, 0.12) !important;
+  border-color: rgba(244, 239, 232, 0.08) !important;
 }
 
 .dark .border-\[\#1a1a1a\]\/10 {
@@ -34,51 +69,144 @@
 }
 
 .dark .border-\[\#1a1a1a\] {
-  border-color: #f4efe8 !important;
+  border-color: rgba(244, 239, 232, 0.2) !important;
 }
 
+/* Grays and section containers */
 .dark .bg-gray-50,
 .dark .bg-gray-50\/50,
 .dark .bg-gray-100 {
   background-color: #272421 !important;
 }
 
+.dark .bg-\[\#f3f4f6\] {
+  background-color: #272421 !important;
+  color: #f4efe8 !important;
+}
+
+/* Soft shadows */
 .dark .shadow-\[10px_10px_0px_\#e5e2da\],
 .dark .shadow-\[15px_15px_0px_\#e5e2da\],
-.dark .shadow-\[20px_20px_0px_\#e5e2da\] {
-  box-shadow: 10px 10px 0px #2a2724 !important;
-}
-
+.dark .shadow-\[20px_20px_0px_\#e5e2da\],
 .dark .shadow-\[10px_10px_0px_\#f5f5f5\] {
-  box-shadow: 10px 10px 0px #1a1816 !important;
+  box-shadow: 10px 10px 0px #23211f !important;
 }
 
-.dark .text-gray-500,
-.dark .text-gray-400 {
-  color: #8c837a !important;
+/* Primary CTA and active state elements with `#1a1a1a` */
+.dark .bg-\[\#1a1a1a\] {
+  background-color: #c5a880 !important;
+  color: #1a150e !important;
 }
 
-.dark .text-gray-800,
-.dark .text-gray-700,
-.dark .text-gray-600 {
-  color: #e0d7ce !important;
+.dark .bg-\[\#1a1a1a\] text,
+.dark .bg-\[\#1a1a1a\] span,
+.dark .bg-\[\#1a1a1a\] p,
+.dark .bg-\[\#1a1a1a\] h1,
+.dark .bg-\[\#1a1a1a\] h2,
+.dark .bg-\[\#1a1a1a\] h3,
+.dark .bg-\[\#1a1a1a\] h4 {
+  color: #1a150e !important;
 }
 
+/* Ensure backdrop overlay doesn't turn brass gold */
+.dark .bg-\[\#1a1a1a\]\/40 {
+  background-color: rgba(0, 0, 0, 0.75) !important;
+}
+
+/* Focus, hover, active states */
+.dark .hover\:bg-gray-800:hover {
+  background-color: #d8ba91 !important;
+  color: #1a150e !important;
+}
+
+.dark .hover\:text-\[\#1a1a1a\]:hover {
+  color: #ffffff !important;
+}
+
+.dark .hover\:border-\[\#1a1a1a\]:hover,
+.dark .focus\:border-\[\#1a1a1a\]:focus {
+  border-color: #ffffff !important;
+}
+
+/* Interactive table highlighting */
 .dark .bg-\[\#fdfbf7\]\/50 {
   background-color: rgba(30, 28, 26, 0.5) !important;
 }
 
-.dark input,
-.dark textarea,
-.dark select {
+.dark .hover\:bg-gray-50:hover,
+.dark .hover\:bg-gray-50\/55:hover,
+.dark .hover\:bg-\[\#fdfbf7\]\/50:hover,
+.dark .hover\:bg-\[\#fdfbf7\]:hover {
+  background-color: rgba(244, 239, 232, 0.05) !important;
+}
+
+/* Input structures */
+.dark input[type="date"],
+.dark input[type="time"],
+.dark input[type="text"],
+.dark select,
+.dark textarea {
   background-color: #272421 !important;
   color: #f4efe8 !important;
-  border-color: rgba(244, 239, 232, 0.2) !important;
+  border-color: rgba(244, 239, 232, 0.15) !important;
 }
 
 .dark input::placeholder,
 .dark textarea::placeholder {
   color: #7c746b !important;
+}
+
+/* Alerts and statuses mapping */
+.dark .bg-amber-50,
+.dark .bg-amber-50\/40,
+.dark .bg-amber-100 {
+  background-color: rgba(197, 168, 128, 0.1) !important;
+  border-color: rgba(197, 168, 128, 0.25) !important;
+  color: #ebdcb9 !important;
+}
+.dark .text-amber-750,
+.dark .text-amber-800,
+.dark .text-amber-900 {
+  color: #ebdcb9 !important;
+}
+
+.dark .bg-green-50 {
+  background-color: rgba(16, 185, 129, 0.1) !important;
+  border-color: rgba(16, 185, 129, 0.25) !important;
+  color: #a7f3d0 !important;
+}
+.dark .text-green-700,
+.dark .text-green-600 {
+  color: #34d399 !important;
+}
+
+.dark .bg-red-50 {
+  background-color: rgba(239, 68, 68, 0.1) !important;
+  border-color: rgba(239, 68, 68, 0.25) !important;
+  color: #fca5a5 !important;
+}
+.dark .text-red-700,
+.dark .text-red-600 {
+  color: #f87171 !important;
+}
+
+.dark .bg-blue-50,
+.dark .bg-blue-50\/80 {
+  background-color: rgba(59, 130, 246, 0.1) !important;
+  border-color: rgba(59, 130, 246, 0.25) !important;
+  color: #93c5fd !important;
+}
+.dark .text-blue-700,
+.dark .text-blue-800,
+.dark .text-blue-900 {
+  color: #93c5fd !important;
+}
+
+/* Elegant status info toast overrides */
+.dark .bg-\[\#fdfbf7\]\/95 {
+  background-color: rgba(30, 28, 26, 0.95) !important;
+  color: #f4efe8 !important;
+  border-color: rgba(197, 168, 128, 0.3) !important;
 }
 
 /* Modals & Popups shadow */
@@ -105,8 +233,8 @@
   border-color: rgba(244, 239, 232, 0.12) !important;
 }
 
-.dark .hover\:bg-gray-50:hover,
-.dark .hover\:bg-gray-50\/55:hover,
-.dark .hover\:bg-\[\#fdfbf7\]\/50:hover {
-  background-color: rgba(244, 239, 232, 0.05) !important;
+/* Global selection color */
+.dark *::selection {
+  background-color: #443c30 !important;
+  color: #ffffff !important;
 }
