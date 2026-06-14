@@ -4,7 +4,7 @@
  */
 
 import React, { useState, useEffect, useRef, ErrorInfo, ReactNode, useMemo } from 'react';
-import { Search, History, BookOpen, Trash2, ArrowRight, Plus, Edit2, X, Save, Settings, LogIn, LogOut, Upload, Download, Loader2, Bell, BellOff, Volume2, VolumeX, WifiOff, Cloud, FileText, Copy, RefreshCw, Check, AlertCircle, ShieldAlert, Clock, CreditCard, CheckCircle, Sun, Moon } from 'lucide-react';
+import { Search, History, BookOpen, Trash2, ArrowRight, Plus, Edit2, X, Save, Settings, LogIn, LogOut, Upload, Download, Loader2, Bell, BellOff, Volume2, VolumeX, WifiOff, Cloud, FileText, Copy, RefreshCw, Check, AlertCircle, ShieldAlert, Clock, CreditCard, CheckCircle, Sun, Moon, Printer } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import * as XLSX from 'xlsx';
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, BarChart, Bar, XAxis, YAxis, CartesianGrid } from 'recharts';
@@ -379,8 +379,7 @@ function MainApp() {
   const [gopayInput, setGopayInput] = useState<string>('');
   const [qrisImageInput, setQrisImageInput] = useState<string>('');
   const [amountInput, setAmountInput] = useState<number>(5000);
-  const [qrisOption, setQrisOption] = useState<'url' | 'upload'>('url');
-  const [selectedAdminSubTab, setSelectedAdminSubTab] = useState<'rekap_bayar' | 'riwayat_eval' | 'pengaturan_bayar' | 'bypass_emails' | 'kelola_typo'>('rekap_bayar');
+  const [selectedAdminSubTab, setSelectedAdminSubTab] = useState<'rekap_bayar' | 'riwayat_eval' | 'pengaturan_bayar' | 'bypass_emails' | 'kelola_typo' | 'audit_db' | 'impor_kata'>('rekap_bayar');
   const [adminTypoMode, setAdminTypoMode] = useState<'checker' | 'admin'>('checker');
   const [typos, setTypos] = useState<TypoEntry[]>([]);
   const [isSeedingTypos, setIsSeedingTypos] = useState(false);
@@ -390,6 +389,40 @@ function MainApp() {
   const [typoFormFields, setTypoFormFields] = useState<{ typo: string; correction: string; category?: string; originalTypo?: string }>({ typo: '', correction: '', category: 'Pemeriksa Typo' });
   const [typoVisibleCount, setTypoVisibleCount] = useState<number>(50);
   const [typoCategoryFilter, setTypoCategoryFilter] = useState<string>('Semua Kategori');
+
+  // Audit Database States
+  const [isAuditing, setIsAuditing] = useState(false);
+  const [auditConflicts, setAuditConflicts] = useState<{
+    id: string;
+    term: string;
+    wordSource: WordEntry;
+    typoSource: TypoEntry;
+    type: 'exact' | 'case_mismatch' | 'whitespace_issue';
+  }[]>([]);
+  const [selectedConflictIds, setSelectedConflictIds] = useState<string[]>([]);
+  const [isAuditDeleting, setIsAuditDeleting] = useState(false);
+
+  // Kamus Excel Import States
+  const [importStep, setImportStep] = useState<'select' | 'mapping' | 'progress'>('select');
+  const [excelColumns, setExcelColumns] = useState<string[]>([]);
+  const [excelRows, setExcelRows] = useState<any[][]>([]);
+  const [excelMapping, setExcelMapping] = useState<{
+    word: string;
+    category: string;
+    etymology: string;
+    definition: string;
+    examples: string;
+    searchCount: string;
+  }>({
+    word: '',
+    category: '',
+    etymology: '',
+    definition: '',
+    examples: '',
+    searchCount: ''
+  });
+  const [importProgress, setImportProgress] = useState<number>(-1);
+  const [importMessage, setImportMessage] = useState<string>('');
 
   useEffect(() => {
     setTypoVisibleCount(50);
@@ -840,11 +873,6 @@ function MainApp() {
     setGopayInput(paymentSettings.gopayNumber);
     setQrisImageInput(paymentSettings.qrisImageUrl);
     setAmountInput(paymentSettings.amount || 5000);
-    if (paymentSettings.qrisImageUrl && paymentSettings.qrisImageUrl.startsWith('data:')) {
-      setQrisOption('upload');
-    } else {
-      setQrisOption('url');
-    }
   }, [paymentSettings]);
 
   const handleEmailSubmit = async (e: React.FormEvent) => {
@@ -2165,6 +2193,253 @@ function MainApp() {
     }
   };
 
+  // Run Database Audit to find duplicate entries
+  const runDatabaseAudit = async () => {
+    if (!db) {
+      showStatus("Basis data tidak tersedia.", "error");
+      return;
+    }
+    setIsAuditing(true);
+    showStatus("Sedang memproses audit database, memindai duplikasi kata...", "info");
+    try {
+      const wordsSnap = await getDocs(collection(db, 'words'));
+      const typosSnap = await getDocs(collection(db, 'typos'));
+
+      const wordMap = new Map<string, WordEntry>();
+      wordsSnap.forEach(docSnap => {
+        const w = docSnap.data() as WordEntry;
+        wordMap.set(w.word.trim().toLowerCase(), w);
+      });
+
+      const conflicts: {
+        id: string;
+        term: string;
+        wordSource: WordEntry;
+        typoSource: TypoEntry;
+        type: 'exact' | 'case_mismatch' | 'whitespace_issue';
+      }[] = [];
+
+      typosSnap.forEach(docSnap => {
+        const t = docSnap.data() as TypoEntry;
+        const normalizedTypo = t.typo.trim().toLowerCase();
+        
+        if (wordMap.has(normalizedTypo)) {
+          const w = wordMap.get(normalizedTypo)!;
+          let issueType: 'exact' | 'case_mismatch' | 'whitespace_issue' = 'exact';
+          
+          if (w.word !== t.typo) {
+            if (w.word.trim() !== t.typo.trim()) {
+              issueType = 'whitespace_issue';
+            } else {
+              issueType = 'case_mismatch';
+            }
+          }
+          
+          conflicts.push({
+            id: normalizedTypo,
+            term: t.typo,
+            wordSource: w,
+            typoSource: t,
+            type: issueType
+          });
+        }
+      });
+
+      setAuditConflicts(conflicts);
+      setSelectedConflictIds([]);
+      showStatus(`Audit selesai: Menemukan ${conflicts.length} konflik duplikasi kata antara database 'words' dan 'typos'.`, conflicts.length > 0 ? "info" : "success");
+    } catch (err: any) {
+      console.error(err);
+      showStatus(`Gagal menjalankan audit database: ${err.message}`, "error");
+    } finally {
+      setIsAuditing(false);
+    }
+  };
+
+  // Bulk audit duplicate deletions
+  const handleAuditDeleteSelected = async (target: 'typos' | 'words' | 'both') => {
+    if (!db) {
+      showStatus("Basis data tidak tersedia.", "error");
+      return;
+    }
+    if (selectedConflictIds.length === 0) {
+      showStatus("Mohon pilih setidaknya satu entri konflik.", "error");
+      return;
+    }
+
+    const confirmMsg = target === 'typos' 
+      ? `Hapus ${selectedConflictIds.length} entri terpilih dari Database Typo? Tindakan ini tidak dapat dibatalkan.`
+      : target === 'words'
+      ? `Hapus ${selectedConflictIds.length} entri terpilih dari Database Kamus Utama 'words'? Tindakan ini tidak dapat dibatalkan.`
+      : `Hapus ${selectedConflictIds.length} entri terpilih dari KEDUA database? Tindakan ini tidak dapat dibatalkan.`;
+
+    if (!window.confirm(confirmMsg)) return;
+
+    setIsAuditDeleting(true);
+    let successCount = 0;
+    try {
+      for (const id of selectedConflictIds) {
+        const conf = auditConflicts.find(c => c.id === id);
+        if (!conf) continue;
+
+        if (target === 'typos' || target === 'both') {
+          await deleteDoc(doc(db, 'typos', conf.typoSource.typo.toLowerCase().trim()));
+        }
+        if (target === 'words' || target === 'both') {
+          await deleteDoc(doc(db, 'words', conf.wordSource.word.toLowerCase().trim()));
+        }
+        successCount++;
+      }
+
+      showStatus(`Berhasil menghapus ${successCount} entri duplikat secara massal!`, "success");
+      await runDatabaseAudit();
+    } catch (err: any) {
+      console.error(err);
+      showStatus(`Gagal menghapus entri duplikat: ${err.message}`, "error");
+    } finally {
+      setIsAuditDeleting(false);
+    }
+  };
+
+  // Handle Custom Excel File Parsing for Kamus Words
+  const handleCustomExcelUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (evt) => {
+      try {
+        const bstr = evt.target?.result as string;
+        const wb = XLSX.read(bstr, { type: 'binary' });
+        const wsname = wb.SheetNames[0];
+        const ws = wb.Sheets[wsname];
+        const data = XLSX.utils.sheet_to_json(ws, { header: 1 }) as any[][];
+        if (data.length === 0) {
+          showStatus("File Excel kosong atau tidak terbaca.", "error");
+          return;
+        }
+
+        const headers = (data[0] || []).map(h => String(h || '').trim());
+        if (headers.length === 0) {
+          showStatus("Header kolom tidak ditemukan di baris pertama.", "error");
+          return;
+        }
+
+        setExcelColumns(headers);
+        setExcelRows(data.slice(1));
+
+        // Auto-match headers based on keywords
+        const mapping = {
+          word: '',
+          category: '',
+          etymology: '',
+          definition: '',
+          examples: '',
+          searchCount: ''
+        };
+
+        headers.forEach(h => {
+          const lh = h.toLowerCase();
+          if (!mapping.word && (lh === 'word' || lh === 'kata' || lh === 'kosakata' || lh === 'lema' || lh === 'istilah' || lh === 'entry')) {
+            mapping.word = h;
+          }
+          if (!mapping.category && (lh === 'kategori' || lh === 'category' || lh === 'golongan' || lh === 'jenis' || lh === 'kelas' || lh === 'pos')) {
+            mapping.category = h;
+          }
+          if (!mapping.etymology && (lh === 'etimologi' || lh === 'etymology' || lh === 'asal asal' || lh === 'asal kata' || lh === 'bahasa asal' || lh === 'asal')) {
+            mapping.etymology = h;
+          }
+          if (!mapping.definition && (lh === 'definisi' || lh === 'definition' || lh === 'arti' || lh === 'makna' || lh === 'keterangan' || lh === 'penjelasan' || lh === 'deskripsi')) {
+            mapping.definition = h;
+          }
+          if (!mapping.examples && (lh === 'contoh' || lh === 'contoh kalimat' || lh === 'examples' || lh === 'penggunaan' || lh === 'contoh_kalimat')) {
+            mapping.examples = h;
+          }
+          if (!mapping.searchCount && (lh === 'pencarian' || lh === 'search' || lh === 'searchcount' || lh === 'jumlah pencarian' || lh === 'hits' || lh.includes('jumlah'))) {
+            mapping.searchCount = h;
+          }
+        });
+
+        setExcelMapping(mapping);
+        setImportStep('mapping');
+        showStatus("Berhasil membaca file Excel. Silakan konfirmasi pemetaan kolom sebelum memulai impor.", "info");
+      } catch (err: any) {
+        console.error(err);
+        showStatus(`Gagal membaca file Excel: ${err.message}`, "error");
+      }
+    };
+    reader.readAsBinaryString(file);
+  };
+
+  // Perform custom mapping process mass insert of words
+  const handleExecuteImportKamus = async () => {
+    if (!db) {
+      showStatus("Basis data tidak tersedia.", "error");
+      return;
+    }
+    if (!excelMapping.word || !excelMapping.definition) {
+      showStatus("Kolom 'Kata' dan 'Definisi' wajib dipetakan.", "error");
+      return;
+    }
+
+    const wordIdx = excelColumns.indexOf(excelMapping.word);
+    const defIdx = excelColumns.indexOf(excelMapping.definition);
+    const catIdx = excelMapping.category ? excelColumns.indexOf(excelMapping.category) : -1;
+    const etyIdx = excelMapping.etymology ? excelColumns.indexOf(excelMapping.etymology) : -1;
+    const exIdx = excelMapping.examples ? excelColumns.indexOf(excelMapping.examples) : -1;
+    const scIdx = excelMapping.searchCount ? excelColumns.indexOf(excelMapping.searchCount) : -1;
+
+    const validRows = excelRows.filter(row => row[wordIdx] && row[defIdx]);
+    if (validRows.length === 0) {
+      showStatus("Tidak ditemukan data valid yang berisi Kata dan Definisi.", "error");
+      return;
+    }
+
+    setImportStep('progress');
+    setImportProgress(0);
+    setImportMessage(`Memulai pengunggahan ${validRows.length} kata leksikon...`);
+
+    let successCount = 0;
+    try {
+      for (let i = 0; i < validRows.length; i++) {
+        const row = validRows[i];
+        const wordStr = String(row[wordIdx]).trim();
+        const categoryStr = catIdx !== -1 && row[catIdx] ? String(row[catIdx]).trim() : "Nomina";
+        const etymologyStr = etyIdx !== -1 && row[etyIdx] ? String(row[etyIdx]).trim() : "";
+        const definitionStr = String(row[defIdx]).trim();
+        const examplesArr = exIdx !== -1 && row[exIdx] ? String(row[exIdx]).split(';').map(s => s.trim()).filter(Boolean) : [];
+        const searchCountNum = scIdx !== -1 && row[scIdx] ? Number(row[scIdx]) || 0 : 0;
+
+        const wordId = wordStr.toLowerCase();
+        await setDoc(doc(db, 'words', wordId), {
+          word: wordStr,
+          category: categoryStr,
+          etymology: etymologyStr,
+          definition: definitionStr,
+          examples: examplesArr,
+          searchCount: searchCountNum,
+          updatedAt: new Date().toISOString()
+        });
+
+        successCount++;
+        const pct = Math.round(((i + 1) / validRows.length) * 100);
+        setImportProgress(pct);
+        setImportMessage(`Mengimpor: ${i + 1} / ${validRows.length} kata (${pct}%)...`);
+      }
+
+      showStatus(`Sukses mengimpor ${successCount} kata secara massal dengan pemetaan kolom!`, "success");
+      setImportStep('select');
+      setExcelColumns([]);
+      setExcelRows([]);
+      setImportProgress(-1);
+    } catch (err: any) {
+      console.error(err);
+      showStatus(`Proses pengimporan berhenti karena kesalahan: ${err.message}`, "error");
+      setImportStep('select');
+      setImportProgress(-1);
+    }
+  };
+
   // Load history
   useEffect(() => {
     const savedHistory = localStorage.getItem('kamus_history');
@@ -2487,7 +2762,8 @@ function MainApp() {
 
   return (
     <div className={`min-h-screen font-serif transition-colors duration-300 pb-20 ${darkMode ? 'dark bg-[#131211] text-[#f4efe8] selection:bg-[#322c22]' : 'bg-[#fdfbf7] text-[#1a1a1a] selection:bg-gray-200'}`}>
-      {/* Header */}
+      <div className="print:hidden">
+        {/* Header */}
       <header className="max-w-6xl mx-auto px-6 py-6 md:py-8 flex flex-col md:flex-row md:items-center justify-between border-b border-[#1a1a1a]/10 mb-8 md:mb-12">
         <div className="cursor-pointer group flex items-center gap-4" onClick={() => { setResult(null); setSearchQuery(''); }}>
           <div className="w-12 h-12 md:w-16 md:h-16 bg-gradient-to-br from-[#1a1a1a] to-gray-700 rounded-xl flex items-center justify-center shadow-lg transform group-hover:scale-105 transition-all">
@@ -3125,7 +3401,7 @@ function MainApp() {
                   <h2 className="text-2xl font-black uppercase tracking-tight font-sans text-gray-800">Panel Manajemen Admin Typo</h2>
                   <p className="text-xs text-gray-500 font-serif mt-1">Konfirmasi pembayaran GOPAY/QRIS pengguna, unduh riwayat evaluasi kata, dan konfigurasikan saluran pembayaran.</p>
                 </div>
-                <div className="flex bg-gray-50 p-1 border border-gray-100 rounded-sm">
+                <div className="flex flex-wrap md:flex-nowrap gap-1 bg-gray-50 p-1 border border-gray-100 rounded-sm max-w-full">
                   <button
                     onClick={() => setSelectedAdminSubTab('rekap_bayar')}
                     className={`px-4 py-2 text-[10px] uppercase font-sans font-bold tracking-wider transition-all rounded-sm ${selectedAdminSubTab === 'rekap_bayar' ? 'bg-[#1a1a1a] text-white shadow-md' : 'text-gray-500 hover:text-[#1a1a1a]'}`}
@@ -3155,6 +3431,18 @@ function MainApp() {
                     className={`px-4 py-2 text-[10px] uppercase font-sans font-bold tracking-wider transition-all rounded-sm ${selectedAdminSubTab === 'kelola_typo' ? 'bg-[#1a1a1a] text-white shadow-md' : 'text-gray-500 hover:text-[#1a1a1a]'}`}
                   >
                     Basis Data Typo (KBBI)
+                  </button>
+                  <button
+                    onClick={() => setSelectedAdminSubTab('audit_db')}
+                    className={`px-4 py-2 text-[10px] uppercase font-sans font-bold tracking-wider transition-all rounded-sm ${selectedAdminSubTab === 'audit_db' ? 'bg-[#1a1a1a] text-white shadow-md' : 'text-gray-500 hover:text-[#1a1a1a]'}`}
+                  >
+                    Audit Database 🔍
+                  </button>
+                  <button
+                    onClick={() => setSelectedAdminSubTab('impor_kata')}
+                    className={`px-4 py-2 text-[10px] uppercase font-sans font-bold tracking-wider transition-all rounded-sm ${selectedAdminSubTab === 'impor_kata' ? 'bg-[#1a1a1a] text-white shadow-md' : 'text-gray-500 hover:text-[#1a1a1a]'}`}
+                  >
+                    Impor Kamus Kata 📘
                   </button>
                 </div>
               </div>
@@ -3603,7 +3891,7 @@ function MainApp() {
                 <div className="space-y-6 max-w-xl animate-in fade-in duration-300">
                   <div>
                     <h3 className="text-xs font-sans font-black uppercase tracking-widest text-[#1a1a1a]">Konfigurasi Gopay &amp; QRIS</h3>
-                    <p className="text-[11px] text-gray-400 font-serif mt-1">Ubah nomor pengantaran gopay dan tautan QRIS bayar. Perubahan disimpan ke Firestore dan langsung berefek pada pop-up transaksi klien secara realtime.</p>
+                    <p className="text-[11px] text-gray-400 font-serif mt-1">Ubah nomor pengantaran gopay dan unggah QRIS pembayaran. Perubahan disimpan ke Firestore dan langsung berefek pada pop-up transaksi klien secara realtime.</p>
                   </div>
 
                   <div className="space-y-6 pt-4">
@@ -3631,57 +3919,27 @@ function MainApp() {
                     </div>
 
                     <div className="space-y-4">
-                      <label className="block text-[9px] font-sans font-bold uppercase tracking-widest text-[#1a1a1a] opacity-55 font-sans">Opsi Model Gambar QRIS</label>
-                      <div className="flex border border-gray-200 p-0.5 rounded-sm bg-gray-50/50">
-                        <button
-                          type="button"
-                          onClick={() => setQrisOption('url')}
-                          className={`flex-1 py-2 text-[10px] uppercase font-sans font-bold tracking-wider transition-all rounded-[2px] ${qrisOption === 'url' ? 'bg-[#1a1a1a] text-white shadow-sm' : 'text-gray-500 hover:text-[#1a1a1a]'}`}
-                        >
-                          Pakai Link URL
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setQrisOption('upload')}
-                          className={`flex-1 py-2 text-[10px] uppercase font-sans font-bold tracking-wider transition-all rounded-[2px] ${qrisOption === 'upload' ? 'bg-[#1a1a1a] text-white shadow-sm' : 'text-gray-500 hover:text-[#1a1a1a]'}`}
-                        >
-                          Upload Foto QRIS
-                        </button>
-                      </div>
+                      <label className="block text-[9px] font-sans font-bold uppercase tracking-widest text-[#1a1a1a] opacity-55 font-sans">Unggah Gambar QRIS</label>
 
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-6 items-start pt-2">
                         <div className="space-y-4">
-                          {qrisOption === 'url' ? (
-                            <div className="space-y-2 animate-in fade-in duration-200">
-                              <label className="block text-[9px] font-sans font-bold uppercase tracking-widest text-[#1a1a1a] opacity-55 font-sans">Tautan / URL Gambar QRIS</label>
+                          <div className="space-y-2 animate-in fade-in duration-200">
+                            <label className="block text-[9px] font-sans font-bold uppercase tracking-widest text-[#1a1a1a] opacity-55 font-sans">Unggah Gambar QRIS (.png, .jpg, .jpeg)</label>
+                            <div className="border border-dashed border-gray-300 hover:border-[#1a1a1a] bg-gray-50/50 rounded-sm p-4 text-center cursor-pointer relative transition-all">
                               <input
-                                type="text"
-                                value={qrisImageInput}
-                                onChange={(e) => setQrisImageInput(e.target.value)}
-                                placeholder="Contoh: https://example.com/qris.png"
-                                className="w-full text-base font-mono border-b border-gray-200 focus:border-[#1a1a1a] focus:outline-none py-2 bg-transparent text-gray-800"
+                                id="qris-file-upload-input"
+                                type="file"
+                                accept="image/png, image/jpeg, image/jpg"
+                                onChange={handleQrisFileUpload}
+                                className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
                               />
-                              <p className="text-[10px] text-gray-400 font-serif italic">Ketik atau tempel URL gambar QRIS langsung.</p>
-                            </div>
-                          ) : (
-                            <div className="space-y-2 animate-in fade-in duration-200">
-                              <label className="block text-[9px] font-sans font-bold uppercase tracking-widest text-[#1a1a1a] opacity-55 font-sans">Unggah Gambar QRIS (.png, .jpg, .jpeg)</label>
-                              <div className="border border-dashed border-gray-300 hover:border-[#1a1a1a] bg-gray-50/50 rounded-sm p-4 text-center cursor-pointer relative transition-all">
-                                <input
-                                  id="qris-file-upload-input"
-                                  type="file"
-                                  accept="image/png, image/jpeg, image/jpg"
-                                  onChange={handleQrisFileUpload}
-                                  className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
-                                />
-                                <div className="flex flex-col items-center justify-center gap-1 text-gray-400">
-                                  <Upload size={18} />
-                                  <span className="text-[10px] font-sans font-semibold uppercase tracking-wider text-gray-500">Pilih File QRIS</span>
-                                  <span className="text-[9px] font-serif italic text-gray-400">klik atau seret ke sini (Maks 1MB)</span>
-                                </div>
+                              <div className="flex flex-col items-center justify-center gap-1 text-gray-400">
+                                <Upload size={18} />
+                                <span className="text-[10px] font-sans font-semibold uppercase tracking-wider text-gray-500">Pilih File QRIS</span>
+                                <span className="text-[9px] font-serif italic text-gray-400">klik atau seret ke sini (Maks 1MB)</span>
                               </div>
                             </div>
-                          )}
+                          </div>
                         </div>
 
                         {/* Visual Preview */}
@@ -3707,7 +3965,7 @@ function MainApp() {
                               </button>
                             </div>
                           ) : (
-                            <span className="text-[10px] text-gray-400 font-serif italic">Belum ada gambar QRIS terpasang. Unggah file gambar atau masukkan URL.</span>
+                            <span className="text-[10px] text-gray-400 font-serif italic">Belum ada gambar QRIS terpasang. Silakan unggah gambar QRIS Anda.</span>
                           )}
                         </div>
                       </div>
@@ -4080,6 +4338,448 @@ function MainApp() {
                   })()}
                 </div>
               )}
+
+              {/* DATABASE AUDIT VIEW */}
+              {selectedAdminSubTab === 'audit_db' && (
+                <div className="space-y-6 animate-in fade-in duration-300 pointer-events-auto">
+                  <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 border-b border-gray-100 pb-4">
+                    <div>
+                      <h3 className="text-xs font-sans font-black uppercase tracking-widest text-[#1a1a1a]">Audit Duplikasi Leksikon &amp; Typo</h3>
+                      <p className="text-[11px] text-gray-400 font-serif mt-1">
+                        Secara otomatis memindai persimpangan antara entri kosakata utama (words) dengan kamus kesalahan penulisan (typos). Duplikasi kata di kedua tempat membingungkan sistem pencari dan wajib dibersihkan.
+                      </p>
+                    </div>
+                    <button
+                      id="btn-run-audit"
+                      onClick={runDatabaseAudit}
+                      disabled={isAuditing}
+                      className="px-5 py-2.5 bg-[#1a1a1a] hover:bg-gray-800 disabled:opacity-50 text-white rounded-sm text-[10px] uppercase font-sans font-black tracking-widest transition-all flex items-center gap-2 shadow-md cursor-pointer shrink-0"
+                    >
+                      {isAuditing ? (
+                        <>
+                          <Loader2 size={12} className="animate-spin" />
+                          <span>Menganalisis...</span>
+                        </>
+                      ) : (
+                        <>
+                          <RefreshCw size={12} />
+                          <span>Mulai Audit Database</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
+
+                  {isAuditing ? (
+                    <div className="border border-gray-200 bg-gray-50/50 rounded-sm p-12 text-center flex flex-col items-center justify-center space-y-3">
+                      <Loader2 size={24} className="animate-spin text-gray-400" />
+                      <span className="text-xs font-sans font-bold uppercase tracking-wider text-gray-650">Sedang Memindai Silang Data</span>
+                      <span className="text-[11px] font-serif italic text-gray-400">Menghubungi Firebase Firestore, mengumpulkan data kata &amp; typo...</span>
+                    </div>
+                  ) : auditConflicts.length === 0 ? (
+                    <div className="border border-green-200 bg-green-50/30 rounded-sm p-10 text-center flex flex-col items-center justify-center space-y-4">
+                      <div className="w-12 h-12 rounded-full bg-green-50/80 border border-green-200 flex items-center justify-center text-green-600">
+                        <CheckCircle size={24} />
+                      </div>
+                      <div className="space-y-1">
+                        <h4 className="text-sm font-sans font-black uppercase tracking-wider text-green-900">Database Bersih</h4>
+                        <p className="text-xs text-green-800 font-serif max-w-md">
+                          Hebat! Tidak ditemukan konflik duplikasi kata antara koleksi basis data kamus utama 'words' dan daftar kesalahan ketik 'typos'.
+                        </p>
+                      </div>
+                      <button
+                        onClick={runDatabaseAudit}
+                        className="text-[10px] font-sans font-black uppercase tracking-widest text-[#1a1a1a] underline hover:no-underline cursor-pointer"
+                      >
+                        Pindai Ulang
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="space-y-4">
+                      {/* Metric & Info Banner */}
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                        <div className="p-4 bg-amber-50/50 border border-amber-200 rounded-sm flex items-start gap-3">
+                          <ShieldAlert className="text-amber-600 shrink-0 mt-0.5" size={18} />
+                          <div>
+                            <span className="text-[10px] font-sans font-bold uppercase tracking-wider text-amber-900 block">Total Temuan Konflik</span>
+                            <span className="text-2xl font-black font-sans text-amber-950 block">{auditConflicts.length} Kata</span>
+                            <span className="text-[10px] text-amber-800 font-serif leading-tight block mt-0.5">Satu kata terdaftar di kamus baku dan terdaftar sebagai kata typo tidak baku secara bersamaan.</span>
+                          </div>
+                        </div>
+
+                        <div className="p-4 bg-gray-50 border border-gray-200 rounded-sm flex flex-col xs:flex-row items-start xs:items-center justify-between col-span-1 md:col-span-2 gap-4">
+                          <div className="space-y-0.5">
+                            <span className="text-[10px] font-sans font-bold uppercase tracking-wider text-gray-400 block">Tindakan Penghapusan Massal</span>
+                            <p className="text-[11px] text-gray-500 font-serif leading-tight">Pilih baris di bawah, lalu tentukan tindakan perbaikan massal:</p>
+                          </div>
+                          
+                          <div className="flex flex-wrap gap-2">
+                            <button
+                              id="btn-audit-del-typo"
+                              onClick={() => handleAuditDeleteSelected('typos')}
+                              disabled={selectedConflictIds.length === 0 || isAuditDeleting}
+                              className="px-3 py-1.5 bg-red-650 hover:bg-red-700 text-white disabled:opacity-40 text-[9px] uppercase font-sans font-black tracking-wider rounded-sm transition-all flex items-center gap-1 shadow-sm cursor-pointer"
+                              title="Hapus kata terpilih hanya dari database Typo"
+                            >
+                              <Trash2 size={11} />
+                              Hapus dari Typo ({selectedConflictIds.length})
+                            </button>
+                            <button
+                              id="btn-audit-del-words"
+                              onClick={() => handleAuditDeleteSelected('words')}
+                              disabled={selectedConflictIds.length === 0 || isAuditDeleting}
+                              className="px-3 py-1.5 bg-amber-600 hover:bg-amber-700 text-white disabled:opacity-40 text-[9px] uppercase font-sans font-black tracking-wider rounded-sm transition-all flex items-center gap-1 shadow-sm cursor-pointer"
+                              title="Hapus kata terpilih dari kamus utama 'words'"
+                            >
+                              <Trash2 size={11} />
+                              Hapus dari Kamus ({selectedConflictIds.length})
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Conflict list Table representation */}
+                      <div className="border border-gray-200 rounded-sm overflow-hidden">
+                        {/* Selector Controls Bar */}
+                        <div className="bg-gray-50 p-3 border-b border-gray-200 flex flex-wrap justify-between items-center gap-3">
+                          <div className="flex items-center gap-2">
+                            <button
+                              onClick={() => setSelectedConflictIds(auditConflicts.map(c => c.id))}
+                              className="px-2.5 py-1 border border-gray-300 hover:border-[#1a1a1a] text-[10px] uppercase font-sans font-black tracking-wider rounded-sm bg-white text-gray-700 transition cursor-pointer"
+                            >
+                              Pilih Semua
+                            </button>
+                            <button
+                              onClick={() => setSelectedConflictIds([])}
+                              className="px-2.5 py-1 border border-gray-300 hover:border-[#1a1a1a] text-[10px] uppercase font-sans font-black tracking-wider rounded-sm bg-white text-gray-700 transition cursor-pointer"
+                            >
+                              Bersihkan Pilihan
+                            </button>
+                          </div>
+                          <span className="text-[10px] font-mono text-gray-400">
+                            Terpilih {selectedConflictIds.length} dari {auditConflicts.length} konflik
+                          </span>
+                        </div>
+
+                        <div className="overflow-x-auto max-h-[400px]">
+                          <table className="w-full text-left font-sans text-xs">
+                            <thead>
+                              <tr className="bg-gray-50 border-b border-gray-200 text-gray-500 uppercase tracking-widest text-[9px] font-black sticky top-0 z-10">
+                                <th className="px-6 py-3 w-12 text-center">
+                                  <input 
+                                    type="checkbox"
+                                    checked={selectedConflictIds.length === auditConflicts.length && auditConflicts.length > 0}
+                                    onChange={(e) => {
+                                      if (e.target.checked) {
+                                        setSelectedConflictIds(auditConflicts.map(c => c.id));
+                                      } else {
+                                        setSelectedConflictIds([]);
+                                      }
+                                    }}
+                                    className="rounded border-gray-300 focus:ring-[#1a1a1a] h-3.5 w-3.5 text-[#1a1a1a] cursor-pointer"
+                                  />
+                                </th>
+                                <th className="px-6 py-3">Kata Terkonflik</th>
+                                <th className="px-6 py-3">Sumber KBBI Utama</th>
+                                <th className="px-6 py-3">Koreksi Bentuk Typo Silang</th>
+                                <th className="px-6 py-3">Jenis Masalah</th>
+                                <th className="px-6 py-3 text-right">Tindakan Cepat</th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-gray-150">
+                              {auditConflicts.map((c, idx) => {
+                                const isChecked = selectedConflictIds.includes(c.id);
+                                return (
+                                  <tr key={c.id + idx} className={`hover:bg-gray-50/50 transition-colors ${isChecked ? 'bg-amber-50/10' : ''}`}>
+                                    <td className="px-6 py-3 text-center">
+                                      <input 
+                                        type="checkbox"
+                                        checked={isChecked}
+                                        onChange={(e) => {
+                                          if (e.target.checked) {
+                                            setSelectedConflictIds(prev => [...prev, c.id]);
+                                          } else {
+                                            setSelectedConflictIds(prev => prev.filter(item => item !== c.id));
+                                          }
+                                        }}
+                                        className="rounded border-gray-300 focus:ring-[#1a1a1a] h-3.5 w-3.5 text-[#1a1a1a] cursor-pointer"
+                                      />
+                                    </td>
+                                    <td className="px-6 py-3 font-mono font-bold text-gray-800">{c.term}</td>
+                                    <td className="px-6 py-3">
+                                      <span className="inline-flex flex-col">
+                                        <strong className="text-[11px] font-sans font-bold text-gray-700 capitalize">{c.wordSource.category || 'Nomina'}</strong>
+                                        <span className="text-[10px] text-gray-400 font-serif italic line-clamp-1" title={c.wordSource.definition}>{c.wordSource.definition}</span>
+                                      </span>
+                                    </td>
+                                    <td className="px-6 py-3 font-mono text-gray-500">
+                                      <span className="text-[10px] text-red-500 font-bold">&#8594; Koreksi ke: {c.typoSource.correction}</span>
+                                    </td>
+                                    <td className="px-6 py-3">
+                                      <span className={`inline-flex items-center px-2 py-0.5 rounded text-[9px] font-sans font-extrabold uppercase tracking-widest border ${
+                                        c.type === 'exact' ? 'bg-red-50 text-red-700 border-red-200' :
+                                        c.type === 'case_mismatch' ? 'bg-amber-50 text-amber-700 border-amber-200' :
+                                        'bg-blue-50 text-blue-700 border-blue-200'
+                                      }`}>
+                                        {c.type === 'exact' ? '⚠️ Duplikasi Persis' :
+                                         c.type === 'case_mismatch' ? '🔡 Perbedaan Huruf' : '␣ Spasi Kosong'}
+                                      </span>
+                                    </td>
+                                    <td className="px-6 py-3 text-right">
+                                      <div className="inline-flex rounded-sm shadow-sm">
+                                        <button
+                                          onClick={async () => {
+                                            if (!db) return;
+                                            if (!window.confirm(`Hapus typo "${c.term}" dari Database Typo?`)) return;
+                                            try {
+                                              await deleteDoc(doc(db, 'typos', c.typoSource.typo.toLowerCase().trim()));
+                                              showStatus(`Berhasil menghapus typo "${c.term}"`, "success");
+                                              await runDatabaseAudit();
+                                            } catch (err: any) {
+                                              showStatus(err.message, "error");
+                                            }
+                                          }}
+                                          className="px-2.5 py-1 text-[9px] font-bold uppercase tracking-wider text-red-650 bg-red-50/50 hover:bg-red-50 hover:text-red-800 border border-gray-200 hover:border-red-100 rounded-l-sm transition-colors cursor-pointer"
+                                        >
+                                          Hapus Typo
+                                        </button>
+                                        <button
+                                          onClick={async () => {
+                                            if (!db) return;
+                                            if (!window.confirm(`Hapus lema "${c.term}" dari Kamus Utama?`)) return;
+                                            try {
+                                              await deleteDoc(doc(db, 'words', c.wordSource.word.toLowerCase().trim()));
+                                              showStatus(`Berhasil menghapus kamus "${c.term}"`, "success");
+                                              await runDatabaseAudit();
+                                            } catch (err: any) {
+                                              showStatus(err.message, "error");
+                                            }
+                                          }}
+                                          className="px-2.5 py-1 text-[9px] font-bold uppercase tracking-wider text-amber-600 bg-amber-50/50 hover:bg-amber-50 hover:text-amber-800 border-t border-b border-r border-gray-200 hover:border-amber-100 rounded-r-sm transition-colors cursor-pointer"
+                                        >
+                                          Hapus Kamus
+                                        </button>
+                                      </div>
+                                    </td>
+                                  </tr>
+                                );
+                              })}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* IMPORE KAMUS WORDS FROM EXCEL VIEW */}
+              {selectedAdminSubTab === 'impor_kata' && (
+                <div className="space-y-6 animate-in fade-in duration-300 pointer-events-auto">
+                  <div>
+                    <h3 className="text-xs font-sans font-black uppercase tracking-widest text-[#1a1a1a]">Impor Massal Kamus Kata (Leksikon)</h3>
+                    <p className="text-[11px] text-gray-400 font-serif mt-1">
+                      Unggah file Excel berisi ratusan hingga ribuan entri kosakata baru untuk disuntikkan ke dalam kamus utama 'words'. Sistem mendukung pencocokan pintar dan pemetaan kolom dinamis untuk menyesuaikan header Excel Anda.
+                    </p>
+                  </div>
+
+                  {importStep === 'select' && (
+                    <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 items-stretch">
+                      {/* Upload Box */}
+                      <div className="lg:col-span-2 border border-dashed border-gray-300 hover:border-[#1a1a1a] rounded-sm p-8 bg-gray-50/50 hover:bg-white text-center cursor-pointer transition-all flex flex-col items-center justify-center min-h-[250px] relative">
+                        <input
+                          id="excel-kamus-uploader"
+                          type="file"
+                          accept=".xlsx, .xls"
+                          onChange={handleCustomExcelUpload}
+                          className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                        />
+                        <div className="flex flex-col items-center justify-center gap-3 text-gray-400">
+                          <Upload size={32} className="text-gray-400" />
+                          <span className="text-xs font-sans font-bold uppercase tracking-widest text-[#1a1a1a]">Pilih File Excel Kosakata</span>
+                          <p className="text-[11px] text-gray-500 font-serif leading-tight max-w-sm mt-1">
+                            Klik atau seret file spreadsheet (.xlsx, .xls) ke sini. <br/>Suntikkan kamus tanpa membatasi format kolom Anda.
+                          </p>
+                        </div>
+                      </div>
+
+                      {/* Structural Guide and Helper */}
+                      <div className="border border-amber-200/60 bg-amber-50/20 rounded-sm p-5 space-y-4">
+                        <div className="flex gap-2">
+                          <AlertCircle size={16} className="text-amber-700 mt-0.5 shrink-0" />
+                          <h4 className="text-[10px] font-sans font-black uppercase tracking-wider text-amber-900">Petunjuk Kolom &amp; Format</h4>
+                        </div>
+                        <div className="text-[11px] text-amber-800 font-serif leading-relaxed space-y-2">
+                          <p>Database kamus utama menyimpan skema sebagai berikut:</p>
+                          <ul className="list-disc pl-4 space-y-1">
+                            <li><strong>Kata</strong> (Wajib): Kosakata baku / kata masukan</li>
+                            <li><strong>Definisi</strong> (Wajib): Arti penjelasan sesuai kamus ekstensif</li>
+                            <li><strong>Kategori</strong> (Opsional): Misalnya Nomina, Verba, Adjektiva, dll. (Default: Nomina)</li>
+                            <li><strong>Etimologi</strong> (Opsional): Jejak asal-usul kata serapan bahasa</li>
+                            <li><strong>Contoh Kalimat</strong> (Opsional): Contoh tertulis. Pisahkan multi-kalimat dengan tanda titik koma (<code>;</code>)</li>
+                            <li><strong>Pencarian</strong> (Opsional): Angka statistik hits pencarian awal (Default: 0)</li>
+                          </ul>
+                          <p className="text-[10px] italic pt-1 border-t border-amber-200">Tip: Header tidak harus persis. Sistem akan menebak nama kolom secara otomatis, dan Anda dapat memetakan ulang secara bebas di layar berikutnya.</p>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {importStep === 'mapping' && (
+                    <div className="bg-white border border-gray-200 rounded-sm p-6 space-y-6 animate-in slide-in-from-bottom-3 duration-300">
+                      <div className="border-b border-gray-100 pb-3 flex justify-between items-center">
+                        <div>
+                          <h4 className="text-xs font-sans font-black uppercase tracking-wider text-[#1a1a1a]">Pemetaan Kolom Spreadsheet</h4>
+                          <p className="text-[11px] text-gray-400 font-serif">Konfirmasi silang header Excel Anda dengan kolom destinasi firestore database.</p>
+                        </div>
+                        <span className="text-[10px] font-mono bg-gray-100 px-3 py-1 rounded-sm text-gray-650 font-bold">
+                          Terdeteksi: {excelRows.length} baris data
+                        </span>
+                      </div>
+
+                      {/* Drop-down Mappings list */}
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        {/* Word mapping */}
+                        <div className="space-y-1">
+                          <label className="block text-[10px] font-sans font-bold uppercase tracking-widest text-gray-500">Kolom Kata / Lema (Wajib)</label>
+                          <select
+                            value={excelMapping.word}
+                            onChange={(e) => setExcelMapping(prev => ({ ...prev, word: e.target.value }))}
+                            className="w-full text-xs px-3 py-2 border border-gray-200 focus:border-[#1a1a1a] focus:outline-none bg-white text-gray-800 rounded-sm font-sans cursor-pointer font-bold"
+                          >
+                            <option value="">-- Pilih Kolom Kata --</option>
+                            {excelColumns.map(col => (
+                              <option key={col} value={col}>{col}</option>
+                            ))}
+                          </select>
+                        </div>
+
+                        {/* Definition mapping */}
+                        <div className="space-y-1">
+                          <label className="block text-[10px] font-sans font-bold uppercase tracking-widest text-gray-500 font-sans">Kolom Definisi / Makna (Wajib)</label>
+                          <select
+                            value={excelMapping.definition}
+                            onChange={(e) => setExcelMapping(prev => ({ ...prev, definition: e.target.value }))}
+                            className="w-full text-xs px-3 py-2 border border-gray-200 focus:border-[#1a1a1a] focus:outline-none bg-white text-gray-800 rounded-sm font-sans cursor-pointer font-bold"
+                          >
+                            <option value="">-- Pilih Kolom Makna --</option>
+                            {excelColumns.map(col => (
+                              <option key={col} value={col}>{col}</option>
+                            ))}
+                          </select>
+                        </div>
+
+                        {/* Category mapping */}
+                        <div className="space-y-1">
+                          <label className="block text-[10px] font-sans font-bold uppercase tracking-widest text-gray-500 font-sans font-semibold">Kolom Jenis Kategori (Opsional)</label>
+                          <select
+                            value={excelMapping.category}
+                            onChange={(e) => setExcelMapping(prev => ({ ...prev, category: e.target.value }))}
+                            className="w-full text-xs px-3 py-2 border border-gray-200 focus:border-[#1a1a1a] focus:outline-none bg-white text-gray-800 rounded-sm font-sans cursor-pointer"
+                          >
+                            <option value="">-- Gunakan Default "Nomina" --</option>
+                            {excelColumns.map(col => (
+                              <option key={col} value={col}>{col}</option>
+                            ))}
+                          </select>
+                        </div>
+
+                        {/* Etymology mapping */}
+                        <div className="space-y-1">
+                          <label className="block text-[10px] font-sans font-bold uppercase tracking-widest text-gray-500 font-sans font-semibold font-sans">Kolom Etimologi / Asal (Opsional)</label>
+                          <select
+                            value={excelMapping.etymology}
+                            onChange={(e) => setExcelMapping(prev => ({ ...prev, etymology: e.target.value }))}
+                            className="w-full text-xs px-3 py-2 border border-gray-200 focus:border-[#1a1a1a] focus:outline-none bg-white text-gray-800 rounded-sm font-sans cursor-pointer"
+                          >
+                            <option value="">-- Hiraukan / Kosongkan --</option>
+                            {excelColumns.map(col => (
+                              <option key={col} value={col}>{col}</option>
+                            ))}
+                          </select>
+                        </div>
+
+                        {/* Examples mapping */}
+                        <div className="space-y-1">
+                          <label className="block text-[10px] font-sans font-bold uppercase tracking-widest text-gray-500 font-sans font-semibold font-sans">Kolom Contoh Kalimat (Opsional)</label>
+                          <select
+                            value={excelMapping.examples}
+                            onChange={(e) => setExcelMapping(prev => ({ ...prev, examples: e.target.value }))}
+                            className="w-full text-xs px-3 py-2 border border-gray-200 focus:border-[#1a1a1a] focus:outline-none bg-white text-gray-800 rounded-sm font-sans cursor-pointer"
+                          >
+                            <option value="">-- Hiraukan / Kosongkan --</option>
+                            {excelColumns.map(col => (
+                              <option key={col} value={col}>{col}</option>
+                            ))}
+                          </select>
+                        </div>
+
+                        {/* Search count mapping */}
+                        <div className="space-y-1">
+                          <label className="block text-[10px] font-sans font-bold uppercase tracking-widest text-gray-500 font-sans font-semibold font-sans">Kolom Jumlah Pencarian (Opsional)</label>
+                          <select
+                            value={excelMapping.searchCount}
+                            onChange={(e) => setExcelMapping(prev => ({ ...prev, searchCount: e.target.value }))}
+                            className="w-full text-xs px-3 py-2 border border-gray-200 focus:border-[#1a1a1a] focus:outline-none bg-white text-gray-800 rounded-sm font-sans cursor-pointer"
+                          >
+                            <option value="">-- Setel "0" (Garis Awal) --</option>
+                            {excelColumns.map(col => (
+                              <option key={col} value={col}>{col}</option>
+                            ))}
+                          </select>
+                        </div>
+                      </div>
+
+                      {/* Operation Actions */}
+                      <div className="flex items-center gap-3 pt-4 border-t border-gray-150">
+                        <button
+                          id="btn-confirm-import-excel"
+                          onClick={handleExecuteImportKamus}
+                          disabled={!excelMapping.word || !excelMapping.definition}
+                          className="px-6 py-3 bg-[#1a1a1a] hover:bg-gray-800 disabled:opacity-40 text-white rounded-sm text-[10px] uppercase font-sans font-black tracking-widest transition-all flex items-center gap-1.5 shadow-md cursor-pointer"
+                        >
+                          <CheckCircle size={12} />
+                          <span>Mulai Impor Leksikon</span>
+                        </button>
+                        <button
+                          onClick={() => {
+                            setImportStep('select');
+                            setExcelColumns([]);
+                            setExcelRows([]);
+                          }}
+                          className="px-4 py-3 border border-gray-200 hover:border-gray-300 text-gray-600 rounded-sm text-[10px] uppercase font-sans font-black tracking-widest transition-all cursor-pointer"
+                        >
+                          Batal / Pilih File Lain
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  {importStep === 'progress' && (
+                    <div className="border border-gray-200 bg-white rounded-sm p-8 space-y-6 text-center animate-in scale-in duration-200 max-w-xl mx-auto">
+                      <div className="flex flex-col items-center space-y-3">
+                        <Loader2 size={32} className="animate-spin text-gray-700" />
+                        <h4 className="text-xs font-sans font-black uppercase tracking-wider text-gray-800">Sinkronisasi Kosakata ke Firestore</h4>
+                        <p className="text-[11px] font-mono text-gray-500">{importMessage}</p>
+                      </div>
+
+                      {/* Real Progress Bar */}
+                      <div className="space-y-1">
+                        <div className="w-full bg-gray-100 rounded-full h-2 overflow-hidden">
+                          <div 
+                            className="bg-[#1a1a1a] h-full transition-all duration-300 ease-out" 
+                            style={{ width: `${importProgress}%` }}
+                          />
+                        </div>
+                        <span className="text-[10px] font-mono font-bold text-gray-600 block text-right">{importProgress}% Selesai</span>
+                      </div>
+
+                      <div className="pt-2">
+                        <p className="text-[10px] text-gray-400 font-serif italic">Harap lapang dada menunggu dan jangan tutup browser tab sebelum proses transmisi Firestore selesai selesai sepenuhnya.</p>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           ) : (
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 lg:gap-12 w-full">
@@ -4179,9 +4879,17 @@ function MainApp() {
                   <p className="text-xs text-gray-500 font-sans">Koreksi otomatis atau ketuk kata yang dihias merah untuk melihat saran.</p>
                 </div>
 
-                {checkedResults.length > 0 ? (
-                  <div className="space-y-6">
-                    {/* Metrics Banner */}
+                <AnimatePresence mode="wait">
+                  {checkedResults.length > 0 ? (
+                    <motion.div
+                      key="results-active"
+                      initial={{ opacity: 0, y: 15 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, y: -15 }}
+                      transition={{ duration: 0.4, ease: "easeOut" }}
+                      className="space-y-6"
+                    >
+                      {/* Metrics Banner */}
                     <div className="grid grid-cols-3 gap-2 py-4 px-4 bg-[#fdfbf7] border border-gray-100 rounded-sm text-center">
                       <div>
                         <p className="text-[8px] font-sans font-bold uppercase tracking-[0.15em] opacity-40 mb-0.5">Total Kata</p>
@@ -4312,28 +5020,44 @@ function MainApp() {
                       </div>
                     )}
 
-                    {/* Copy Corrected Text panel */}
-                    <div className="pt-4 border-t border-gray-100 flex gap-2">
+                    {/* Copy & Print Corrected Text panel */}
+                    <div className="pt-4 border-t border-gray-100 flex flex-col sm:flex-row gap-2">
                       <button
                         onClick={() => {
                           const fullCorrected = checkedResults.map(r => r.text).join('');
                           navigator.clipboard.writeText(fullCorrected);
                           showStatus("Teks hasil koreksi disalin ke clipboard!", "success");
                         }}
-                        className="w-full py-3 border border-[#1a1a1a] hover:bg-[#1a1a1a] hover:text-white text-[#1a1a1a] transition-all rounded-sm text-[10px] font-sans font-bold uppercase tracking-widest flex items-center justify-center gap-2"
+                        className="flex-1 py-3 border border-[#1a1a1a] hover:bg-[#1a1a1a] hover:text-white text-[#1a1a1a] transition-all rounded-sm text-[10px] font-sans font-bold uppercase tracking-widest flex items-center justify-center gap-2 font-black"
                       >
                         <Copy size={12} /> Salin Hasil Teks
                       </button>
+                      <button
+                        onClick={() => {
+                          window.print();
+                        }}
+                        className="flex-1 py-3 bg-[#1a1a1a] hover:bg-gray-800 text-white transition-all rounded-sm text-[10px] font-sans font-bold uppercase tracking-widest flex items-center justify-center gap-2 font-black shadow-sm"
+                      >
+                        <Printer size={12} /> Cetak Laporan
+                      </button>
                     </div>
-                  </div>
-                ) : (
-                  <div className="py-20 text-center border-2 border-dashed border-gray-200 rounded-sm">
-                    <div className="bg-green-50 text-green-500 rounded-full w-12 h-12 flex items-center justify-center border border-green-200 mx-auto mb-4">
-                      <Check size={20} />
-                    </div>
-                    <p className="text-sm italic text-gray-400 px-6 font-serif">Unggah berkas atau ketik teks di sebelah kiri lalu klik "Periksa Kesalahan" untuk memulai analisis kata.</p>
-                  </div>
-                )}
+                    </motion.div>
+                  ) : (
+                    <motion.div
+                      key="results-empty"
+                      initial={{ opacity: 0, y: 10 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, y: -10 }}
+                      transition={{ duration: 0.3 }}
+                      className="py-20 text-center border-2 border-dashed border-gray-200 rounded-sm"
+                    >
+                      <div className="bg-green-50 text-green-500 rounded-full w-12 h-12 flex items-center justify-center border border-green-200 mx-auto mb-4">
+                        <Check size={20} />
+                      </div>
+                      <p className="text-sm italic text-gray-400 px-6 font-serif">Unggah berkas atau ketik teks di sebelah kiri lalu klik "Periksa Kesalahan" untuk memulai analisis kata.</p>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
               </div>
             </div>
           </div>
@@ -4688,6 +5412,116 @@ function MainApp() {
           </form>
         </div>
       )}
+
+      </div>
+
+      {/* LAPORAN CETAK - Hanya muncul saat mencetak */}
+      <div className="hidden print:block bg-white text-black font-sans p-10 max-w-4xl mx-auto border border-gray-250">
+        <div className="flex justify-between items-start border-b-2 border-[#1a1a1a] pb-6 mb-8">
+          <div>
+            <h1 className="text-2xl font-black uppercase tracking-tight text-[#1a1a1a] mb-1 font-sans">LEKSIKON KBBI DIGITAL</h1>
+            <p className="text-[10px] tracking-widest uppercase text-gray-500 font-bold">Laporan Resmi Evaluasi &amp; Pemeriksaan Typo</p>
+          </div>
+          <div className="text-right text-xs">
+            <p className="font-bold text-gray-800">Tanggal Pemeriksaan:</p>
+            <p className="text-gray-600 font-medium">
+              {(() => {
+                const d = new Date();
+                const months = [
+                  'Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni',
+                  'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'
+                ];
+                const days = ['Minggu', 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu'];
+                return `${days[d.getDay()]} , ${d.getDate()} ${months[d.getMonth()]} ${d.getFullYear()}`;
+              })()}
+            </p>
+          </div>
+        </div>
+
+        {/* Ringkasan Statistik */}
+        <div className="mb-8">
+          <h2 className="text-sm font-bold uppercase tracking-wider text-[#1a1a1a] mb-4 pb-1 border-b border-gray-200">Ringkasan Evaluasi</h2>
+          <div className="grid grid-cols-3 gap-4 text-center">
+            <div className="bg-gray-50 border border-gray-100 p-4 rounded-sm">
+              <p className="text-[9px] uppercase tracking-wider text-gray-400 font-bold font-sans mb-1">Total Kata Diperiksa</p>
+              <p className="text-2xl font-black text-[#1a1a1a]">
+                {checkedResults.filter(r => r.isWord).length}
+              </p>
+            </div>
+            <div className="bg-gray-50 border border-gray-100 p-4 rounded-sm">
+              <p className="text-[9px] uppercase tracking-wider text-gray-400 font-bold font-sans mb-1">Typo Terdeteksi</p>
+              <p className={`text-2xl font-black ${checkedResults.some(r => r.isTypo) ? 'text-amber-600' : 'text-green-600'}`}>
+                {checkedResults.filter(r => r.isTypo).length}
+              </p>
+            </div>
+            <div className="bg-gray-50 border border-gray-100 p-4 rounded-sm">
+              <p className="text-[9px] uppercase tracking-wider text-gray-400 font-bold font-sans mb-1">Skor Presisi</p>
+              <p className="text-2xl font-black text-green-600">
+                {(() => {
+                  const totWords = checkedResults.filter(r => r.isWord).length;
+                  if (totWords === 0) return '100%';
+                  const typos = checkedResults.filter(r => r.isTypo).length;
+                  return `${Math.round(((totWords - typos) / totWords) * 100)}%`;
+                })()}
+              </p>
+            </div>
+          </div>
+        </div>
+
+        {/* Detil Temuan Typo */}
+        <div className="mb-8">
+          <h2 className="text-sm font-bold uppercase tracking-wider text-[#1a1a1a] mb-4 pb-1 border-b border-gray-200">Daftar Kata Salah (Typo)</h2>
+          {checkedResults.filter(r => r.isTypo).length > 0 ? (
+            <table className="w-full text-left text-xs border-collapse">
+              <thead>
+                <tr className="border-b-2 border-gray-200 text-gray-700 font-bold">
+                  <th className="py-2.5 w-12">No</th>
+                  <th className="py-2.5">Kata Salah (Typo)</th>
+                  <th className="py-2.5">Saran Koreksi</th>
+                  <th className="py-2.5">Status</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100">
+                {checkedResults.filter(r => r.isTypo).map((item, idx) => (
+                  <tr key={idx} className="text-gray-800">
+                    <td className="py-2.5 font-medium">{idx + 1}</td>
+                    <td className="py-2.5 text-red-600 font-medium line-through">{item.text}</td>
+                    <td className="py-2.5 text-green-600 font-black">{item.bestSuggestion || '(Tidak ada saran)'}</td>
+                    <td className="py-2.5">
+                      <span className="inline-block px-1.5 py-0.5 bg-amber-50 text-amber-700 border border-amber-100 rounded-sm text-[9px] font-bold uppercase tracking-wider">Perbaiki</span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          ) : (
+            <div className="p-6 border border-dashed border-green-200 bg-green-50/55 rounded-sm text-center">
+              <p className="text-xs text-green-700 font-bold mb-1">Selamat! Tidak Ditemukan Typo</p>
+              <p className="text-[11px] text-green-600 font-medium">Dokumen Anda telah diperiksa dan bersih dari kesalahan penulisan (typo) berdasarkan bank data Leksikon.</p>
+            </div>
+          )}
+        </div>
+
+        {/* Pratinjau Teks Hasil Koreksi */}
+        <div className="mb-8">
+          <h2 className="text-sm font-bold uppercase tracking-wider text-[#1a1a1a] mb-4 pb-1 border-b border-gray-200">Teks Hasil Koreksi Lengkap</h2>
+          <div className="p-4 bg-gray-50 border border-gray-200 rounded-sm text-xs font-serif leading-relaxed text-gray-800 whitespace-pre-wrap">
+            {checkedResults.map(r => r.text).join('')}
+          </div>
+        </div>
+
+        {/* Signatures & Footer */}
+        <div className="mt-16 flex justify-between items-end border-t border-gray-150 pt-8 text-[10px] text-gray-400">
+          <div>
+            <p className="font-bold text-gray-500 uppercase tracking-wider mb-1">LEKSIKON ENGINE v1.2</p>
+            <p>Sistem Deteksi Typo Otomatis berbasis KBBI</p>
+          </div>
+          <div className="text-right flex flex-col items-end">
+            <p className="font-medium text-gray-500">Dicetak melalui:</p>
+            <p className="font-bold text-gray-700">Pemeriksa Typo Leksikon KBBI</p>
+          </div>
+        </div>
+      </div>
 
       {/* Custom Stackable Toast Container */}
       <div className="fixed bottom-6 right-6 z-[100] flex flex-col gap-3 w-[90%] max-w-sm pointer-events-none">
