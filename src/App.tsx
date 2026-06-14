@@ -1034,17 +1034,54 @@ function MainApp() {
       return;
     }
 
-    // Limit to 1MB to prevent Firestore document size overflow
-    if (file.size > 1024 * 1024) {
-      showStatus("File terlalu besar! Maksimal ukuran gambar adalah 1MB agar bisa disimpan.", "error");
+    // Limit to 5MB before compression
+    if (file.size > 5 * 1024 * 1024) {
+      showStatus("File terlalu besar! Maksimal ukuran gambar asli adalah 5MB.", "error");
       return;
     }
 
     const reader = new FileReader();
     reader.onload = (event) => {
       if (event.target?.result) {
-        setQrisImageInput(event.target.result as string);
-        showStatus("Gambar QRIS berhasil diunggah secara lokal!", "success");
+        // High quality client-side canvas-based image compressor
+        const img = new Image();
+        img.src = event.target.result as string;
+        img.onload = () => {
+          const canvas = document.createElement('canvas');
+          const MAX_WIDTH = 450;
+          const MAX_HEIGHT = 450;
+          let width = img.width;
+          let height = img.height;
+
+          if (width > height) {
+            if (width > MAX_WIDTH) {
+              height *= MAX_WIDTH / width;
+              width = MAX_WIDTH;
+            }
+          } else {
+            if (height > MAX_HEIGHT) {
+              width *= MAX_HEIGHT / height;
+              height = MAX_HEIGHT;
+            }
+          }
+          canvas.width = width;
+          canvas.height = height;
+          const ctx = canvas.getContext('2d');
+          if (ctx) {
+            ctx.drawImage(img, 0, 0, width, height);
+            // Compress to JPEG with 0.7 quality to keep it ~20-55KB
+            const compressedBase64 = canvas.toDataURL('image/jpeg', 0.7);
+            setQrisImageInput(compressedBase64);
+            showStatus("Gambar QRIS berhasil diunggah & dikompresi agar muat disimpan!", "success");
+          } else {
+            setQrisImageInput(event.target.result as string);
+            showStatus("Gambar QRIS berhasil diunggah secara lokal!", "success");
+          }
+        };
+        img.onerror = () => {
+          setQrisImageInput(event.target.result as string);
+          showStatus("Gambar QRIS berhasil diunggah secara lokal!", "success");
+        };
       }
     };
     reader.onerror = () => {
@@ -1074,6 +1111,7 @@ function MainApp() {
     } catch (e) {
       console.error(e);
       showStatus("Gagal menyimpan.", "error");
+      handleFirestoreError(e, OperationType.WRITE, 'settings/global');
     } finally {
       setIsProcessing(false);
     }

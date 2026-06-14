@@ -62,16 +62,16 @@ service cloud.firestore {
     function isValidTypoUser(data) {
       return data.keys().size() <= 6
         && (!data.keys().contains('email') || (data.email is string && data.email.size() <= 128))
-        && (!data.keys().contains('usageCount') || data.usageCount is int)
+        && (!data.keys().contains('usageCount') || data.usageCount is number)
         && (!data.keys().contains('paymentStatus') || (data.paymentStatus is string && data.paymentStatus.size() <= 20))
-        && (!data.keys().contains('allowedLimit') || data.allowedLimit is int);
+        && (!data.keys().contains('allowedLimit') || data.allowedLimit is number);
     }
 
     // Payment logs
     function isValidPayment(data) {
       return data.keys().size() <= 6
         && (!data.keys().contains('email') || (data.email is string && data.email.size() <= 128))
-        && (!data.keys().contains('amount') || data.amount is int)
+        && (!data.keys().contains('amount') || data.amount is number)
         && (!data.keys().contains('status') || (data.status is string && data.status.size() <= 20))
         && (!data.keys().contains('requestedAt') || data.requestedAt is string)
         && (!data.keys().contains('approvedAt') || data.approvedAt is string);
@@ -81,8 +81,8 @@ service cloud.firestore {
     function isValidSettings(data) {
       return data.keys().size() <= 4
         && (!data.keys().contains('gopayNumber') || (data.gopayNumber is string && data.gopayNumber.size() <= 50))
-        && (!data.keys().contains('qrisImageUrl') || (data.qrisImageUrl is string && data.qrisImageUrl.size() <= 1000))
-        && (!data.keys().contains('amount') || data.amount is int);
+        && (!data.keys().contains('qrisImageUrl') || (data.qrisImageUrl is string && data.qrisImageUrl.size() <= 1500000))
+        && (!data.keys().contains('amount') || data.amount is number);
     }
 
     // White-listed items can bypass checks
@@ -107,7 +107,7 @@ service cloud.firestore {
         && (!data.keys().contains('title') || (data.title is string && data.title.size() <= 200))
         && (!data.keys().contains('description') || (data.description is string && data.description.size() <= 2000))
         && (!data.keys().contains('format') || (data.format is string && data.format.size() <= 10))
-        && (!data.keys().contains('price') || data.price is int)
+        && (!data.keys().contains('price') || data.price is number)
         && (!data.keys().contains('contentUrl') || (data.contentUrl is string && data.contentUrl.size() <= 1050000));
     }
 
@@ -118,7 +118,7 @@ service cloud.firestore {
         && (!data.keys().contains('customerPhone') || (data.customerPhone is string && data.customerPhone.size() <= 50))
         && (!data.keys().contains('customerEmail') || (data.customerEmail is string && data.customerEmail.size() <= 128))
         && (!data.keys().contains('productId') || (data.productId is string && data.productId.size() <= 128))
-        && (!data.keys().contains('amount') || data.amount is int)
+        && (!data.keys().contains('amount') || data.amount is number)
         && (!data.keys().contains('status') || (data.status is string && data.status.size() <= 50))
         && (!data.keys().contains('requestedAt') || data.requestedAt is string)
         && (!data.keys().contains('approvedAt') || data.approvedAt is string);
@@ -149,8 +149,8 @@ service cloud.firestore {
       allow read: if true;
       allow create, update: if isValidId(statId) 
         && (incoming().keys().size() <= 3)
-        && (!incoming().keys().contains('totalSearches') || incoming().totalSearches is int)
-        && (!incoming().keys().contains('totalInstalls') || incoming().totalInstalls is int);
+        && (!incoming().keys().contains('totalSearches') || incoming().totalSearches is number)
+        && (!incoming().keys().contains('totalInstalls') || incoming().totalInstalls is number);
     }
 
     // Notifications
