@@ -38,90 +38,92 @@ service cloud.firestore {
 
     function isValidWord(data) {
       return data.keys().size() <= 8
-        && (!data.keys().contains('word') || (data.word is string && data.word.size() > 0 && data.word.size() <= 100))
-        && (!data.keys().contains('category') || (data.category is string && data.category.size() > 0 && data.category.size() <= 50))
-        && (!data.keys().contains('definition') || (data.definition is string && data.definition.size() > 0 && data.definition.size() <= 2000))
-        && (!data.keys().contains('examples') || (data.examples is list && data.examples.size() <= 10))
-        && (!data.keys().contains('etymology') || (data.etymology is string && data.etymology.size() <= 1000))
-        && (!data.keys().contains('updatedAt') || data.updatedAt is string)
-        && (!data.keys().contains('searchCount') || data.searchCount is int);
+        && (!data.keys().hasAny(['word']) || (data.word is string && data.word.size() > 0 && data.word.size() <= 100))
+        && (!data.keys().hasAny(['category']) || (data.category is string && data.category.size() > 0 && data.category.size() <= 50))
+        && (!data.keys().hasAny(['definition']) || (data.definition is string && data.definition.size() > 0 && data.definition.size() <= 2000))
+        && (!data.keys().hasAny(['examples']) || (data.examples is list && data.examples.size() <= 10))
+        && (!data.keys().hasAny(['etymology']) || (data.etymology is string && data.etymology.size() <= 1000))
+        && (!data.keys().hasAny(['updatedAt']) || data.updatedAt is string)
+        && (!data.keys().hasAny(['searchCount']) || data.searchCount is int);
     }
 
     // Evaluates checks and stats logged securely
     function isValidEvaluation(data) {
       return data.keys().size() <= 7
-        && (!data.keys().contains('email') || (data.email is string && data.email.size() <= 128))
-        && (!data.keys().contains('totalWords') || data.totalWords is int)
-        && (!data.keys().contains('typosCount') || data.typosCount is int)
-        && (!data.keys().contains('precision') || (data.precision is string && data.precision.size() <= 20))
-        && (!data.keys().contains('inputText') || (data.inputText is string && data.inputText.size() <= 100000))
-        && (!data.keys().contains('timestamp') || data.timestamp is string);
+        && (!data.keys().hasAny(['email']) || (data.email is string && data.email.size() <= 128))
+        && (!data.keys().hasAny(['totalWords']) || data.totalWords is int)
+        && (!data.keys().hasAny(['typosCount']) || data.typosCount is int)
+        && (!data.keys().hasAny(['precision']) || (data.precision is string && data.precision.size() <= 20))
+        && (!data.keys().hasAny(['inputText']) || (data.inputText is string && data.inputText.size() <= 100000))
+        && (!data.keys().hasAny(['timestamp']) || data.timestamp is string);
     }
 
     // Fully flexible user mapping (to avoid merge update issues on missing values)
     function isValidTypoUser(data) {
       return data.keys().size() <= 6
-        && (!data.keys().contains('email') || (data.email is string && data.email.size() <= 128))
-        && (!data.keys().contains('usageCount') || data.usageCount is number)
-        && (!data.keys().contains('paymentStatus') || (data.paymentStatus is string && data.paymentStatus.size() <= 20))
-        && (!data.keys().contains('allowedLimit') || data.allowedLimit is number);
+        && (!data.keys().hasAny(['email']) || (data.email is string && data.email.size() <= 128))
+        && (!data.keys().hasAny(['usageCount']) || (data.usageCount is int || data.usageCount is float))
+        && (!data.keys().hasAny(['paymentStatus']) || (data.paymentStatus is string && data.paymentStatus.size() <= 20))
+        && (!data.keys().hasAny(['allowedLimit']) || (data.allowedLimit is int || data.allowedLimit is float));
     }
 
     // Payment logs
     function isValidPayment(data) {
       return data.keys().size() <= 6
-        && (!data.keys().contains('email') || (data.email is string && data.email.size() <= 128))
-        && (!data.keys().contains('amount') || data.amount is number)
-        && (!data.keys().contains('status') || (data.status is string && data.status.size() <= 20))
-        && (!data.keys().contains('requestedAt') || data.requestedAt is string)
-        && (!data.keys().contains('approvedAt') || data.approvedAt is string);
+        && (!data.keys().hasAny(['email']) || (data.email is string && data.email.size() <= 128))
+        && (!data.keys().hasAny(['amount']) || (data.amount is int || data.amount is float))
+        && (!data.keys().hasAny(['status']) || (data.status is string && data.status.size() <= 20))
+        && (!data.keys().hasAny(['requestedAt']) || data.requestedAt is string)
+        && (!data.keys().hasAny(['approvedAt']) || data.approvedAt is string);
     }
 
     // Global settings configurations
     function isValidSettings(data) {
       return data.keys().size() <= 4
-        && (!data.keys().contains('gopayNumber') || (data.gopayNumber is string && data.gopayNumber.size() <= 50))
-        && (!data.keys().contains('qrisImageUrl') || (data.qrisImageUrl is string && data.qrisImageUrl.size() <= 1500000))
-        && (!data.keys().contains('amount') || data.amount is number);
+        && (!data.keys().hasAny(['gopayNumber']) || (data.gopayNumber is string && data.gopayNumber.size() <= 50))
+        && (!data.keys().hasAny(['qrisImageUrl']) || (data.qrisImageUrl is string && data.qrisImageUrl.size() <= 1500000))
+        && (!data.keys().hasAny(['amount']) || (data.amount is int || data.amount is float));
     }
 
     // White-listed items can bypass checks
     function isValidBypassEmail(data) {
       return data.keys().size() <= 5
-        && (!data.keys().contains('email') || (data.email is string && data.email.size() <= 128))
-        && (!data.keys().contains('isActive') || data.isActive is bool)
-        && (!data.keys().contains('createdAt') || data.createdAt is string);
+        && (!data.keys().hasAny(['email']) || (data.email is string && data.email.size() <= 128))
+        && (!data.keys().hasAny(['isActive']) || data.isActive is bool)
+        && (!data.keys().hasAny(['createdAt']) || data.createdAt is string);
     }
 
     // Typo dictionary entries
     function isValidTypoCorrection(data) {
       return data.keys().size() <= 4
-        && (!data.keys().contains('typo') || (data.typo is string && data.typo.size() > 0 && data.typo.size() <= 100))
-        && (!data.keys().contains('correction') || (data.correction is string && data.correction.size() > 0 && data.correction.size() <= 100))
-        && (!data.keys().contains('updatedAt') || data.updatedAt is string);
+        && (!data.keys().hasAny(['typo']) || (data.typo is string && data.typo.size() > 0 && data.typo.size() <= 100))
+        && (!data.keys().hasAny(['correction']) || (data.correction is string && data.correction.size() > 0 && data.correction.size() <= 100))
+        && (!data.keys().hasAny(['updatedAt']) || data.updatedAt is string);
     }
 
     // Products offered in Pustaka Digital
     function isValidLibraryProduct(data) {
       return data.keys().size() <= 10
-        && (!data.keys().contains('title') || (data.title is string && data.title.size() <= 200))
-        && (!data.keys().contains('description') || (data.description is string && data.description.size() <= 2000))
-        && (!data.keys().contains('format') || (data.format is string && data.format.size() <= 10))
-        && (!data.keys().contains('price') || data.price is number)
-        && (!data.keys().contains('contentUrl') || (data.contentUrl is string && data.contentUrl.size() <= 1050000));
+        && (!data.keys().hasAny(['title']) || (data.title is string && data.title.size() <= 200))
+        && (!data.keys().hasAny(['description']) || (data.description is string && data.description.size() <= 2000))
+        && (!data.keys().hasAny(['format']) || (data.format is string && data.format.size() <= 10))
+        && (!data.keys().hasAny(['price']) || (data.price is int || data.price is float))
+        && (!data.keys().hasAny(['contentUrl']) || (data.contentUrl is string && data.contentUrl.size() <= 1050000));
     }
 
     // Library sales logs
     function isValidLibraryPayment(data) {
       return data.keys().size() <= 11
-        && (!data.keys().contains('customerName') || (data.customerName is string && data.customerName.size() <= 128))
-        && (!data.keys().contains('customerPhone') || (data.customerPhone is string && data.customerPhone.size() <= 50))
-        && (!data.keys().contains('customerEmail') || (data.customerEmail is string && data.customerEmail.size() <= 128))
-        && (!data.keys().contains('productId') || (data.productId is string && data.productId.size() <= 128))
-        && (!data.keys().contains('amount') || data.amount is number)
-        && (!data.keys().contains('status') || (data.status is string && data.status.size() <= 50))
-        && (!data.keys().contains('requestedAt') || data.requestedAt is string)
-        && (!data.keys().contains('approvedAt') || data.approvedAt is string);
+        && (!data.keys().hasAny(['customerName']) || (data.customerName is string && data.customerName.size() <= 128))
+        && (!data.keys().hasAny(['customerPhone']) || (data.customerPhone is string && data.customerPhone.size() <= 50))
+        && (!data.keys().hasAny(['customerEmail']) || (data.customerEmail is string && data.customerEmail.size() <= 128))
+        && (!data.keys().hasAny(['productId']) || (data.productId is string && data.productId.size() <= 128))
+        && (!data.keys().hasAny(['productTitle']) || (data.productTitle is string && data.productTitle.size() <= 200))
+        && (!data.keys().hasAny(['id']) || (data.id is string && data.id.size() <= 128))
+        && (!data.keys().hasAny(['amount']) || (data.amount is int || data.amount is float))
+        && (!data.keys().hasAny(['status']) || (data.status is string && data.status.size() <= 50))
+        && (!data.keys().hasAny(['requestedAt']) || data.requestedAt is string)
+        && (!data.keys().hasAny(['approvedAt']) || data.approvedAt is string);
     }
 
     // --- PHASE 4: Match collections ---
@@ -149,8 +151,8 @@ service cloud.firestore {
       allow read: if true;
       allow create, update: if isValidId(statId) 
         && (incoming().keys().size() <= 3)
-        && (!incoming().keys().contains('totalSearches') || incoming().totalSearches is number)
-        && (!incoming().keys().contains('totalInstalls') || incoming().totalInstalls is number);
+        && (!incoming().keys().hasAny(['totalSearches']) || (incoming().totalSearches is int || incoming().totalSearches is float))
+        && (!incoming().keys().hasAny(['totalInstalls']) || (incoming().totalInstalls is int || incoming().totalInstalls is float));
     }
 
     // Notifications

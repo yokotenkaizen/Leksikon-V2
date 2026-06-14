@@ -6,7 +6,7 @@ import {
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { initialProducts, type DigitalProduct, type LibraryPayment } from '../data/initialProducts';
-import { db, collection, doc, setDoc, getDocs, onSnapshot, updateDoc, deleteDoc } from '../lib/firebase';
+import { db, collection, doc, setDoc, getDocs, onSnapshot, updateDoc, deleteDoc, handleFirestoreError, OperationType } from '../lib/firebase';
 
 interface PustakaDigitalProps {
   isAdmin: boolean;
@@ -350,6 +350,7 @@ Status     : Terverifikasi Aman
     } catch (err) {
       console.error("Gagal mendaftarkan pembayaran:", err);
       showStatus('Terjadi kendala jaringan saat mendaftarkan pembayaran.', 'error');
+      handleFirestoreError(err, OperationType.WRITE, `library_payments/${newPaymentId}`);
     } finally {
       setIsSubmittingPayment(false);
     }
