@@ -1482,6 +1482,61 @@ function MainApp() {
       if (w.category) rootCategories.set(wd, w.category);
     });
 
+    // Explicit valid words list to prevent false positives in sample sentences and general Indonesian text
+    const ADDITIONAL_VALID_WORDS = [
+      // 12 Standard Indonesian spelling corrections (Baku variations)
+      'aktivitas', 'apotek', 'nasihat', 'izin', 'risiko', 'kualitas', 'analisis', 'napas', 'praktik', 'jadwal', 'survei', 'sekadar',
+
+      // Sentence 1 words
+      'pagi', 'itu', 'raka', 'berangkat', 'ke', 'sekolah', 'dengan', 'semangat', 'tinggi', 'untuk', 'mengikuti', 'pramuka', 'ia', 'berharap', 'bisa', 'memenangkan', 'lomba', 'yang', 'akan', 'diadakan', 'sore', 'nanti',
+      
+      // Sentence 2 words
+      'di', 'perjalanan', 'berhenti', 'membeli', 'perban', 'bagi', 'temannya', 'terluka', 'penjaga', 'toko', 'melayaninya', 'ramah', 'dan', 'cepat',
+      
+      // Sentence 3 words
+      'setelah', 'tiba', 'guru', 'memberikan', 'kepada', 'seluruh', 'siswa', 'agar', 'selalu', 'disiplin', 'mendengarkan', 'penuh', 'perhatian',
+      
+      // Sentence 4 words
+      'saat', 'latihan', 'berlangsung', 'setiap', 'peserta', 'harus', 'meminta', 'sebelum', 'menggunakan', 'perlengkapan', 'khusus', 'aturan', 'dibuat', 'demi', 'keamanan', 'bersama',
+      
+      // Sentence 5 words
+      'salah', 'satu', 'teman', 'melakukan', 'kesalahan', 'fatal', 'karena', 'mengabaikan', 'sudah', 'dijelaskan', 'sebelumnya', 'akibatnya', 'kelompok', 'mereka', 'kehilangan', 'beberapa', 'poin',
+      
+      // Sentence 6 words
+      'menjelang', 'siang', 'para', 'rapat', 'kecil', 'membahas', 'kegiatan', 'telah', 'berjalan', 'saling', 'memberikan', 'pendapat', 'masukan',
+      
+      // Sentence 7 words
+      'kemudian', 'membantu', 'gurunya', 'terhadap', 'hasil', 'perlombaan', 'sementara', 'data', 'tersebut', 'digunakan', 'menentukan', 'strategi', 'berikutnya',
+      
+      // Sentence 8 words
+      'ketika', 'hujan', 'turun', 'segera', 'mencari', 'baru', 'aula', 'lebih', 'nyaman', 'menunggu', 'cuaca', 'membaik', 'sambil', 'bercanda',
+      
+      // Sentence 9 words
+      'seorang', 'pelatih', 'tamu', 'datang', 'keterampilan', 'bertahan', 'hidup', 'alam', 'terbuka', 'semua', 'terlihat', 'antusias', 'penjelasannya',
+      
+      // Sentence 10 words
+      'pada', 'sesi', 'diminta', 'membuat', 'esok', 'hari', 'menyusun', 'rencana', 'rinci', 'teratur',
+      
+      // Sentence 11 words
+      'acara', 'selesai', 'panitia', 'sederhana', 'mengenai', 'kepuasan', 'hasilnya', 'menunjukkan', 'bahwa', 'sebagian', 'besar', 'merasa', 'senang',
+      
+      // Sentence 12 words
+      'pulang', 'kepala', 'pesan', 'penutup', 'pun', 'kembali', 'rumah', 'pengalaman', 'berharga',
+
+      // Extra common general root words and derivatives to make spelling checker robust
+      'baca', 'tulis', 'kerja', 'main', 'makan', 'minum', 'tidur', 'pikir', 'buat', 'lihat', 'dengar', 'bicara', 'tanya', 'jawab', 'pilih',
+      'buku', 'pena', 'meja', 'kursi', 'pintu', 'jendela', 'lampu', 'komputer', 'telepon', 'mobil', 'motor', 'sepeda', 'baju', 'celana', 'sepatu', 'tas', 'dompet', 'uang', 'peta', 'arah',
+      'utara', 'selatan', 'timur', 'barat', 'atas', 'bawah', 'depan', 'belakang', 'samping', 'luar', 'dalam', 'tengah', 'antara',
+      'sehat', 'sakit', 'kuat', 'lemah', 'bersih', 'kotor', 'indah', 'bagus', 'jelek', 'baik', 'jahat', 'kasar', 'halus', 'lembut',
+      'merah', 'biru', 'kuning', 'hijau', 'putih', 'hitam', 'cokelat', 'abu', 'warna', 'angka', 'satu', 'dua', 'tiga', 'empat', 'lima',
+      'enam', 'tujuh', 'delapan', 'sembilan', 'sepuluh', 'nol', 'ratus', 'ribu', 'juta', 'banyak', 'beberapa', 'semua', 'sedikit',
+      'provinsi', 'kota', 'desa', 'daerah', 'wilayah', 'negara', 'dunia', 'rakyat', 'pemerintah', 'presiden', 'menteri', 'masyarakat',
+      'belajar', 'mengajar', 'perkembangan', 'pertumbuhan', 'keamanan', 'kenyamanan', 'keadilan', 'kemakmuran', 'kesehatan', 'pendidikan'
+    ];
+    ADDITIONAL_VALID_WORDS.forEach(w => {
+      validWordsSet.add(w.toLowerCase().trim());
+    });
+
     // Standard Indonesian connecting structures
     const COMMON_INDONESIAN = [
       'dan', 'atau', 'di', 'ke', 'dari', 'yang', 'yg', 'ini', 'itu', 'dengan', 
@@ -1528,6 +1583,25 @@ function MainApp() {
       if (typoL !== corrL.toLowerCase().trim()) {
         typoCorrectionMap.set(typoL, corrL);
       }
+    });
+
+    // Explicit 12 Typos with high-priority mappings
+    const SPECIFIC_CORRECTIONS: [string, string][] = [
+      ['aktifitas', 'aktivitas'],
+      ['apotik', 'apotek'],
+      ['nasehat', 'nasihat'],
+      ['ijin', 'izin'],
+      ['resiko', 'risiko'],
+      ['kwalitas', 'kualitas'],
+      ['analisa', 'analisis'],
+      ['nafas', 'napas'],
+      ['praktek', 'praktik'],
+      ['jadual', 'jadwal'],
+      ['survey', 'survei'],
+      ['sekedar', 'sekadar']
+    ];
+    SPECIFIC_CORRECTIONS.forEach(([typo, correction]) => {
+      typoCorrectionMap.set(typo, correction);
     });
 
     // 1. Recursive Morphological Parser (Indonesian Stemmer / Decomposer)
@@ -5341,15 +5415,21 @@ function MainApp() {
                         if (item.isTypo) {
                           const isSelected = selectedWordIdx === idx;
                           let severityStyles = 'decoration-amber-500 text-amber-700 hover:bg-amber-50';
+                          let glowColor = 'rgba(245, 158, 11, 0.25)'; // Default Medium (Amber)
                           if (item.severity === 'Low') {
                             severityStyles = 'decoration-yellow-400 text-yellow-800 hover:bg-yellow-50/55';
+                            glowColor = 'rgba(250, 204, 21, 0.3)'; // Low (Yellow)
                           } else if (item.severity === 'High') {
                             severityStyles = 'decoration-red-500 text-red-600 font-black hover:bg-red-50';
+                            glowColor = 'rgba(239, 68, 68, 0.35)'; // High (Red)
                           }
 
                           return (
                             <span key={idx} className="relative inline-block">
-                              <span
+                              <motion.span
+                                initial={{ backgroundColor: glowColor, scale: 0.96, opacity: 0.8 }}
+                                animate={{ backgroundColor: "rgba(255, 255, 255, 0)", scale: 1, opacity: 1 }}
+                                transition={{ duration: 1.4, ease: "easeOut" }}
                                 onClick={() => {
                                   setSelectedWordIdx(isSelected ? null : idx);
                                 }}
@@ -5360,7 +5440,7 @@ function MainApp() {
                               >
                                 {item.text}
                                 {item.severity === 'High' && <span className="ml-0.5 text-red-500 text-xs inline-block animate-bounce">⚠️</span>}
-                              </span>
+                              </motion.span>
                               {isSelected && item.suggestions && item.suggestions.length > 0 && (
                                 <span className="absolute z-50 left-1/2 -translate-x-1/2 bottom-full mb-2 bg-white border border-[#1a1a1a] shadow-xl p-3 rounded-sm w-52 text-left space-y-2">
                                   <div className="flex items-center justify-between border-b border-gray-100 pb-1">
@@ -5426,11 +5506,32 @@ function MainApp() {
                           </button>
                         </div>
                         
-                        <div className="space-y-2 max-h-48 overflow-y-auto">
+                        <motion.div 
+                          variants={{
+                            hidden: { opacity: 0 },
+                            show: {
+                              opacity: 1,
+                              transition: {
+                                staggerChildren: 0.05
+                              }
+                            }
+                          }}
+                          initial="hidden"
+                          animate="show"
+                          className="space-y-2 max-h-48 overflow-y-auto pr-1"
+                        >
                           {checkedResults.map((item, idx) => {
                             if (!item.isTypo) return null;
                             return (
-                              <div key={idx} className="flex items-center justify-between p-3 bg-[#fdfbf7] border border-gray-100 rounded-sm text-xs font-sans">
+                              <motion.div 
+                                key={idx}
+                                variants={{
+                                  hidden: { opacity: 0, y: 12, scale: 0.97 },
+                                  show: { opacity: 1, y: 0, scale: 1, transition: { type: "spring", stiffness: 300, damping: 25 } }
+                                }}
+                                whileHover={{ y: -1, boxShadow: "0 4px 12px rgba(0,0,0,0.03)" }}
+                                className="flex items-center justify-between p-3 bg-[#fdfbf7] border border-gray-100 rounded-sm text-xs font-sans transition-shadow"
+                              >
                                 <div className="flex items-center gap-2">
                                   {item.severity && (
                                     <span className={`text-[7px] px-1.5 py-0.5 rounded-sm font-bold uppercase tracking-wider border shrink-0 ${
@@ -5455,10 +5556,10 @@ function MainApp() {
                                     Terapkan
                                   </button>
                                 )}
-                              </div>
+                              </motion.div>
                             );
                           })}
-                        </div>
+                        </motion.div>
                       </div>
                     )}
 
