@@ -216,6 +216,7 @@ interface CheckedWord {
   isTypo: boolean;
   bestSuggestion?: string;
   suggestions?: string[];
+  severity?: 'Low' | 'Medium' | 'High';
 }
 
 interface BypassEmail {
@@ -366,6 +367,15 @@ function MainApp() {
   const [showPaymentModal, setShowPaymentModal] = useState<boolean>(false);
   const [isSubmittingPayment, setIsSubmittingPayment] = useState<boolean>(false);
   const [allPayments, setAllPayments] = useState<any[]>([]);
+  const pendingOver24hCount = useMemo(() => {
+    const now = new Date().getTime();
+    return allPayments.filter(pay => {
+      if (pay.status !== 'pending' || !pay.requestedAt) return false;
+      const requestedTime = new Date(pay.requestedAt).getTime();
+      const ageHours = (now - requestedTime) / (1000 * 60 * 60);
+      return ageHours > 24;
+    }).length;
+  }, [allPayments]);
   const [allEvaluations, setAllEvaluations] = useState<any[]>([]);
   const [hasWarnedEvaluationsLimit, setHasWarnedEvaluationsLimit] = useState<boolean>(false);
   const [dailySearches, setDailySearches] = useState<{ date: string; count: number }[]>([]);
@@ -913,7 +923,7 @@ function MainApp() {
       const paymentRef = doc(collection(db, 'payments'));
       await setDoc(paymentRef, {
         email: emailKey,
-        amount: 5000,
+        amount: paymentSettings.amount || 5000,
         status: 'pending',
         requestedAt: new Date().toISOString()
       });
@@ -1449,7 +1459,7 @@ function MainApp() {
     }
   };
 
-  // Run Typo Check Analyzers (Deterministic / Offline / Non-AI)
+  // Run Typo Check Analyzers (Context-Aware Morphological, Proper Noun, & DB-Driven Typo Check)
   const handleCheckText = (rawText = typoText) => {
     if (!rawText.trim()) {
       setCheckedResults([]);
@@ -1458,10 +1468,19 @@ function MainApp() {
     
     setIsAnalyzing(true);
     const validWordsSet = new Set<string>();
+    const rootCategories = new Map<string, string>();
     
     // Add dictionary words
-    words.forEach(w => validWordsSet.add(w.word.toLowerCase().trim()));
-    initialWords.forEach(w => validWordsSet.add(w.word.toLowerCase().trim()));
+    words.forEach(w => {
+      const wd = w.word.toLowerCase().trim();
+      validWordsSet.add(wd);
+      if (w.category) rootCategories.set(wd, w.category);
+    });
+    initialWords.forEach(w => {
+      const wd = w.word.toLowerCase().trim();
+      validWordsSet.add(wd);
+      if (w.category) rootCategories.set(wd, w.category);
+    });
 
     // Standard Indonesian connecting structures
     const COMMON_INDONESIAN = [
@@ -1478,55 +1497,392 @@ function MainApp() {
       'kemudian', 'kok', 'sih', 'dong', 'kan', 'deh', 'loh', 'oh', 'ah', 'wah', 'hal'
     ];
     COMMON_INDONESIAN.forEach(w => {
-      validWordsSet.add(w.toLowerCase().trim());
+      const wd = w.toLowerCase().trim();
+      validWordsSet.add(wd);
+      // Give these connection categories if they don't have them
+      if (!rootCategories.has(wd)) {
+        if (['di', 'ke', 'dari', 'pada', 'bagi', 'untuk', 'dengan', 'dalam', 'atas', 'bawah'].includes(wd)) {
+          rootCategories.set(wd, 'Preposisi');
+        } else if (['dan', 'atau', 'karena', 'namun', 'tetapi', 'bahwa', 'jika', 'bila', 'serta', 'maka', 'sehingga', 'lalu', 'kemudian'].includes(wd)) {
+          rootCategories.set(wd, 'Konjungsi');
+        } else if (['sangat', 'amat', 'sekali', 'lebih', 'paling', 'tidak', 'belum', 'sudah', 'sedang', 'akan', 'bukan'].includes(wd)) {
+          rootCategories.set(wd, 'Adverba');
+        } else if (['saya', 'aku', 'kamu', 'anda', 'dia', 'ia', 'mereka', 'kami', 'kita'].includes(wd)) {
+          rootCategories.set(wd, 'Pronomina');
+        }
+      }
     });
+
+    // Build map of typos from both database collection (state) and initialTypos
+    const typoCorrectionMap = new Map<string, string>();
+    initialTypos.forEach(t => {
+      const typoL = t.typo.toLowerCase().trim();
+      const corrL = t.correction.trim();
+      if (typoL !== corrL.toLowerCase().trim()) {
+        typoCorrectionMap.set(typoL, corrL);
+      }
+    });
+    typos.forEach(t => {
+      const typoL = t.typo.toLowerCase().trim();
+      const corrL = t.correction.trim();
+      if (typoL !== corrL.toLowerCase().trim()) {
+        typoCorrectionMap.set(typoL, corrL);
+      }
+    });
+
+    // 1. Recursive Morphological Parser (Indonesian Stemmer / Decomposer)
+    const checkWordValidWithMorphology = (w: string, validSet: Set<string>): { isValid: boolean; stem?: string } => {
+      const wClean = w.toLowerCase().trim();
+      if (validSet.has(wClean)) {
+        return { isValid: true, stem: wClean };
+      }
+
+      // Check hyphenated / double words (e.g., "buku-buku", "anak-anak", "mobil-mobilan")
+      if (wClean.includes('-')) {
+        const parts = wClean.split('-');
+        const partChecks = parts.map(p => checkWordValidWithMorphology(p, validSet));
+        if (partChecks.every(pc => pc.isValid)) {
+          return { isValid: true, stem: wClean };
+        }
+      }
+
+      // a) Strip clitics (from trailing end)
+      const clitics = ['nya', 'lah', 'kah', 'pun', 'ku', 'mu'];
+      for (const clitic of clitics) {
+        if (wClean.endsWith(clitic) && wClean.length > clitic.length + 2) {
+          const stripped = wClean.slice(0, -clitic.length);
+          if (validSet.has(stripped)) {
+            return { isValid: true, stem: stripped };
+          }
+          const sub = checkWordValidWithMorphology(stripped, validSet);
+          if (sub.isValid) {
+            return { isValid: true, stem: sub.stem };
+          }
+        }
+      }
+
+      // b) Strip standard suffixes
+      const suffixes = ['kan', 'an', 'i'];
+      for (const suffix of suffixes) {
+        if (wClean.endsWith(suffix) && wClean.length > suffix.length + 2) {
+          const stripped = wClean.slice(0, -suffix.length);
+          if (validSet.has(stripped)) {
+            return { isValid: true, stem: stripped };
+          }
+          const sub = checkWordValidWithMorphology(stripped, validSet);
+          if (sub.isValid) {
+            return { isValid: true, stem: sub.stem };
+          }
+        }
+      }
+
+      // c) Strip simple passive & aspectual prefixes (di-, ter-, se-, ke-)
+      const simplePrefixes = ['di', 'ter', 'se', 'ke'];
+      for (const pref of simplePrefixes) {
+        if (wClean.startsWith(pref) && wClean.length > pref.length + 2) {
+          const stripped = wClean.slice(pref.length);
+          if (validSet.has(stripped)) {
+            return { isValid: true, stem: stripped };
+          }
+          const sub = checkWordValidWithMorphology(stripped, validSet);
+          if (sub.isValid) {
+            return { isValid: true, stem: sub.stem };
+          }
+        }
+      }
+
+      // d) Strip ber- / be- / bel- prefixes
+      if (wClean.startsWith('ber') && wClean.length > 5) {
+        const stripped = wClean.slice(3);
+        if (validSet.has(stripped)) return { isValid: true, stem: stripped };
+        const sub = checkWordValidWithMorphology(stripped, validSet);
+        if (sub.isValid) return { isValid: true, stem: sub.stem };
+      }
+      if (wClean.startsWith('be') && wClean.length > 4) {
+        const stripped = wClean.slice(2);
+        if (validSet.has(stripped)) return { isValid: true, stem: stripped };
+        const sub = checkWordValidWithMorphology(stripped, validSet);
+        if (sub.isValid) return { isValid: true, stem: sub.stem };
+      }
+      if (wClean.startsWith('bel') && wClean.length > 5) {
+        const stripped = wClean.slice(3);
+        if (validSet.has(stripped)) return { isValid: true, stem: stripped };
+        const sub = checkWordValidWithMorphology(stripped, validSet);
+        if (sub.isValid) return { isValid: true, stem: sub.stem };
+      }
+
+      // e) Strip active nasal prefixes (me-, pe-) with morphophonemic rules
+      const nasals = ['me', 'pe'];
+      for (const n of nasals) {
+        if (wClean.startsWith(n) && wClean.length > n.length + 2) {
+          const base = wClean.slice(n.length);
+
+          if (base.startsWith('nge') && base.length > 3) {
+            const stripped = base.slice(3);
+            if (validSet.has(stripped)) return { isValid: true, stem: stripped };
+          }
+
+          if (base.startsWith('ny') && base.length > 2) {
+            const withS = 's' + base.slice(2);
+            if (validSet.has(withS)) return { isValid: true, stem: withS };
+            const sub = checkWordValidWithMorphology(withS, validSet);
+            if (sub.isValid) return { isValid: true, stem: sub.stem };
+          }
+
+          if (base.startsWith('m') && base.length > 1) {
+            const withP = 'p' + base.slice(1);
+            if (validSet.has(withP)) return { isValid: true, stem: withP };
+            const sub1 = checkWordValidWithMorphology(withP, validSet);
+            if (sub1.isValid) return { isValid: true, stem: sub1.stem };
+
+            const plainM = base;
+            if (validSet.has(plainM)) return { isValid: true, stem: plainM };
+            const sub2 = checkWordValidWithMorphology(plainM, validSet);
+            if (sub2.isValid) return { isValid: true, stem: sub2.stem };
+          }
+
+          if (base.startsWith('n') && base.length > 1) {
+            const withT = 't' + base.slice(1);
+            if (validSet.has(withT)) return { isValid: true, stem: withT };
+            const sub1 = checkWordValidWithMorphology(withT, validSet);
+            if (sub1.isValid) return { isValid: true, stem: sub1.stem };
+
+            const plainN = base;
+            if (validSet.has(plainN)) return { isValid: true, stem: plainN };
+            const sub2 = checkWordValidWithMorphology(plainN, validSet);
+            if (sub2.isValid) return { isValid: true, stem: sub2.stem };
+          }
+
+          if (base.startsWith('ng') && base.length > 2) {
+            const withK = 'k' + base.slice(2);
+            if (validSet.has(withK)) return { isValid: true, stem: withK };
+            const sub1 = checkWordValidWithMorphology(withK, validSet);
+            if (sub1.isValid) return { isValid: true, stem: sub1.stem };
+
+            const plainNg = base;
+            if (validSet.has(plainNg)) return { isValid: true, stem: plainNg };
+            const sub2 = checkWordValidWithMorphology(plainNg, validSet);
+            if (sub2.isValid) return { isValid: true, stem: sub2.stem };
+          }
+
+          const singleMe = base;
+          if (validSet.has(singleMe)) return { isValid: true, stem: singleMe };
+          const sub = checkWordValidWithMorphology(singleMe, validSet);
+          if (sub.isValid) return { isValid: true, stem: sub.stem };
+        }
+      }
+
+      return { isValid: false };
+    };
+
+    // Parse POS category dynamically based on morphological extensions
+    const deriveCategory = (wordStr: string): string => {
+      const clean = wordStr.toLowerCase().trim();
+      if (rootCategories.has(clean)) {
+        return rootCategories.get(clean)!;
+      }
+      const morph = checkWordValidWithMorphology(clean, validWordsSet);
+      if (morph.isValid && morph.stem) {
+        const rootCat = rootCategories.get(morph.stem) || 'Nomina';
+        if (clean.endsWith('an') || clean.startsWith('pe') || (clean.startsWith('ke') && clean.endsWith('an'))) {
+          return 'Nomina';
+        }
+        if (clean.startsWith('me') || clean.startsWith('di') || clean.startsWith('ter')) {
+          return 'Verba';
+        }
+        return rootCat;
+      }
+      return 'Lainnya';
+    };
 
     // Handle tokenization preserving spaces & formatting
     const tokens = rawText.split(/([a-zA-ZáéíóúÁÉÍÓÚ'-]+)/);
     
-    const results: CheckedWord[] = tokens.map((token) => {
+    // Build actual word tokens info list
+    interface WordTokenInfo {
+      tokenIndex: number;
+      text: string;
+      stripped: string;
+      isCapitalized: boolean;
+      isAllCaps: boolean;
+    }
+    const wordTokens: WordTokenInfo[] = [];
+    tokens.forEach((token, idx) => {
       const isWord = /^[a-zA-ZáéíóúÁÉÍÓÚ'-]+$/.test(token) && token.length > 1;
-      if (!isWord) {
+      if (isWord) {
+        wordTokens.push({
+          tokenIndex: idx,
+          text: token,
+          stripped: token.toLowerCase(),
+          isCapitalized: token[0] === token[0].toUpperCase(),
+          isAllCaps: token === token.toUpperCase()
+        });
+      }
+    });
+
+    const wordTokenIdxMap = new Map<number, number>();
+    wordTokens.forEach((wt, i) => {
+      wordTokenIdxMap.set(wt.tokenIndex, i);
+    });
+
+    // Helper functions for sentence context checks
+    const isSentenceStart = (wtIndex: number): boolean => {
+      if (wtIndex === 0) return true;
+      const prevWt = wordTokens[wtIndex - 1];
+      const wt = wordTokens[wtIndex];
+      for (let j = prevWt.tokenIndex + 1; j < wt.tokenIndex; j++) {
+        if (tokens[j].includes('.') || tokens[j].includes('!') || tokens[j].includes('?')) {
+          return true;
+        }
+      }
+      return false;
+    };
+
+    const getGrammaticalExpectations = (wtIndex: number): string[] => {
+      const expected: string[] = [];
+      const prevWt = wtIndex > 0 ? wordTokens[wtIndex - 1] : null;
+      if (prevWt) {
+        const prevClean = prevWt.stripped;
+        const prevCat = deriveCategory(prevClean);
+
+        const indonesianPrepositions = ['di', 'ke', 'dari', 'pada', 'bagi', 'oleh', 'untuk', 'tentang', 'sebagai', 'dalam', 'atas', 'bawah'];
+        if (indonesianPrepositions.includes(prevClean) || prevCat === 'Preposisi') {
+          expected.push('Nomina', 'Pronomina');
+        }
+
+        const indonesianAdverbs = ['sangat', 'amat', 'sekali', 'lebih', 'paling', 'agak', 'begitu', 'terlalu', 'kurang'];
+        if (indonesianAdverbs.includes(prevClean) || prevCat === 'Adverba') {
+          expected.push('Adjektiva', 'Verba');
+        }
+
+        const indonesianAuxiliaries = ['sedang', 'akan', 'telah', 'sudah', 'bisa', 'dapat', 'boleh', 'harus', 'ingin', 'mau', 'belum', 'tidak', 'jangan'];
+        if (indonesianAuxiliaries.includes(prevClean)) {
+          expected.push('Verba', 'Adjektiva');
+        }
+      }
+      return expected;
+    };
+
+    const results: CheckedWord[] = tokens.map((token, idx) => {
+      if (!wordTokenIdxMap.has(idx)) {
         return { text: token, isWord: false, isTypo: false };
       }
 
-      const stripped = token.toLowerCase();
-      if (validWordsSet.has(stripped)) {
-        return { text: token, isWord: true, isTypo: false };
-      }
+      const wtIdx = wordTokenIdxMap.get(idx)!;
+      const wt = wordTokens[wtIdx];
+      const stripped = wt.stripped;
 
-      // Find best recommendations
-      const candidates: { word: string; dist: number }[] = [];
-      validWordsSet.forEach(vWord => {
-        if (Math.abs(vWord.length - stripped.length) <= 3) {
-          const dist = getDistance(stripped, vWord);
-          if (dist <= 3) {
-            candidates.push({ word: vWord, dist });
+      // 1. Check for database mapped direct typos
+      const databaseCorrection = typoCorrectionMap.get(stripped);
+
+      // 2. Morphology verification to avoid incorrect flags
+      const morphResult = checkWordValidWithMorphology(stripped, validWordsSet);
+      const isWordStandard = morphResult.isValid;
+
+      // 3. Proper Noun check
+      const startSentence = isSentenceStart(wtIdx);
+      let isProperNoun = false;
+      if (wt.isCapitalized) {
+        if (!startSentence) {
+          isProperNoun = true;
+        } else {
+          // At sentence start, if accompanied by another capitalized word, it is likely a proper noun
+          const nextWt = wtIdx < wordTokens.length - 1 ? wordTokens[wtIdx + 1] : null;
+          if (nextWt && nextWt.isCapitalized) {
+            isProperNoun = true;
           }
         }
-      });
+      }
 
-      candidates.sort((x, y) => {
-        if (x.dist !== y.dist) return x.dist - y.dist;
-        return Math.abs(x.word.length - stripped.length) - Math.abs(y.word.length - stripped.length);
-      });
+      let isTypo = false;
+      let finalBestSuggestion: string | undefined = undefined;
+      let finalSuggestions: string[] = [];
 
-      const listSugg = candidates.slice(0, 3).map(c => {
-        // Restore capitalizations
-        if (token === token.toUpperCase()) {
-          return c.word.toUpperCase();
-        } else if (token[0] === token[0].toUpperCase()) {
-          return c.word.charAt(0).toUpperCase() + c.word.slice(1);
+      if (databaseCorrection) {
+        isTypo = true;
+        finalBestSuggestion = databaseCorrection;
+        finalSuggestions = [databaseCorrection];
+      } else if (!isWordStandard && !isProperNoun) {
+        isTypo = true;
+        
+        // Contextual grammatical expectation for spelling correction
+        const expectedCategories = getGrammaticalExpectations(wtIdx);
+
+        // Find recommendations
+        const candidates: { word: string; dist: number }[] = [];
+        validWordsSet.forEach(vWord => {
+          if (Math.abs(vWord.length - stripped.length) <= 3) {
+            const dist = getDistance(stripped, vWord);
+            if (dist <= 3) {
+              candidates.push({ word: vWord, dist });
+            }
+          }
+        });
+
+        // Rank search suggestions so grammatically expected speech fits best!
+        candidates.sort((x, y) => {
+          const xCat = deriveCategory(x.word);
+          const yCat = deriveCategory(y.word);
+          const xFitsContext = expectedCategories.includes(xCat);
+          const yFitsContext = expectedCategories.includes(yCat);
+
+          if (xFitsContext && !yFitsContext) return -1;
+          if (!xFitsContext && yFitsContext) return 1;
+
+          if (x.dist !== y.dist) return x.dist - y.dist;
+          return Math.abs(x.word.length - stripped.length) - Math.abs(y.word.length - stripped.length);
+        });
+
+        const listSugg = candidates.slice(0, 3).map(c => {
+          if (token === token.toUpperCase()) {
+            return c.word.toUpperCase();
+          } else if (token[0] === token[0].toUpperCase()) {
+            return c.word.charAt(0).toUpperCase() + c.word.slice(1);
+          }
+          return c.word;
+        });
+
+        finalBestSuggestion = listSugg[0] || undefined;
+        finalSuggestions = listSugg;
+      }
+
+      // Reapply visual casing to best correction
+      if (isTypo && finalBestSuggestion) {
+        const uppercaseBest = token === token.toUpperCase();
+        const capitalizedBest = token[0] === token[0].toUpperCase() && token !== token.toLowerCase();
+
+        finalSuggestions = finalSuggestions.map(s => {
+          if (uppercaseBest) return s.toUpperCase();
+          if (capitalizedBest) return s.charAt(0).toUpperCase() + s.slice(1);
+          return s;
+        });
+
+        if (uppercaseBest) {
+          finalBestSuggestion = finalBestSuggestion.toUpperCase();
+        } else if (capitalizedBest) {
+          finalBestSuggestion = finalBestSuggestion.charAt(0).toUpperCase() + finalBestSuggestion.slice(1);
         }
-        return c.word;
-      });
+      }
+
+      let severity: 'Low' | 'Medium' | 'High' | undefined = undefined;
+      if (isTypo) {
+        const dist = finalBestSuggestion ? getDistance(stripped, finalBestSuggestion.toLowerCase()) : 3;
+        if (dist <= 1) {
+          severity = 'Low';
+        } else if (dist === 2) {
+          severity = 'Medium';
+        } else {
+          severity = 'High';
+        }
+      }
 
       return {
         text: token,
         isWord: true,
-        isTypo: true,
-        bestSuggestion: listSugg[0] || undefined,
-        suggestions: listSugg
+        isTypo: isTypo,
+        bestSuggestion: finalBestSuggestion,
+        suggestions: finalSuggestions,
+        severity: severity
       };
     });
 
@@ -3435,9 +3791,17 @@ function MainApp() {
           {adminTypoMode === 'admin' && isAdmin ? (
             <div className="bg-white border border-[#1a1a1a]/10 rounded-sm p-6 md:p-8 space-y-8 shadow-[10px_10px_0px_#f5f5f5] w-full">
               <div className="flex flex-col md:flex-row justify-between items-start md:items-center border-b border-gray-100 pb-6 gap-4">
-                <div>
+                <div className="w-full md:w-auto">
                   <h2 className="text-2xl font-black uppercase tracking-tight font-sans text-gray-800">Panel Manajemen Admin Typo</h2>
                   <p className="text-xs text-gray-500 font-serif mt-1">Konfirmasi pembayaran GOPAY/QRIS pengguna, unduh riwayat evaluasi kata, dan konfigurasikan saluran pembayaran.</p>
+                  {pendingOver24hCount > 0 && (
+                    <div className="mt-3 flex items-center gap-2 bg-red-50 border border-red-200 text-red-800 px-3 py-2 rounded-sm text-xs font-sans animate-pulse">
+                      <ShieldAlert size={14} className="text-red-600 shrink-0" />
+                      <span>
+                        Peringatan: Terdapat <strong>{pendingOver24hCount}</strong> permohonan pembayaran pending yang telah tertunda lebih dari 24 jam!
+                      </span>
+                    </div>
+                  )}
                 </div>
                 <div className="flex flex-wrap md:flex-nowrap gap-1 bg-gray-50 p-1 border border-gray-100 rounded-sm max-w-full">
                   <button
@@ -3529,7 +3893,7 @@ function MainApp() {
                                 )}
                               </td>
                               <td className="px-6 py-4 font-mono text-gray-950 font-bold">
-                                Rp. {String(pay.amount || 5000).replace(/\B(?=(\d{3})+(?!\d))/g, ".")}
+                                Rp. {String(pay.amount || paymentSettings.amount || 5000).replace(/\B(?=(\d{3})+(?!\d))/g, ".")}
                               </td>
                               <td className="px-6 py-4 text-gray-400">
                                 {pay.requestedAt ? new Date(pay.requestedAt).toLocaleString("id-ID") : "-"}
@@ -4976,22 +5340,51 @@ function MainApp() {
 
                         if (item.isTypo) {
                           const isSelected = selectedWordIdx === idx;
+                          let severityStyles = 'decoration-amber-500 text-amber-700 hover:bg-amber-50';
+                          if (item.severity === 'Low') {
+                            severityStyles = 'decoration-yellow-400 text-yellow-800 hover:bg-yellow-50/55';
+                          } else if (item.severity === 'High') {
+                            severityStyles = 'decoration-red-500 text-red-600 font-black hover:bg-red-50';
+                          }
+
                           return (
                             <span key={idx} className="relative inline-block">
                               <span
                                 onClick={() => {
                                   setSelectedWordIdx(isSelected ? null : idx);
                                 }}
-                                className={`cursor-pointer underline decoration-wavy decoration-amber-500 font-bold ${
-                                  isSelected ? 'bg-amber-100 text-amber-950' : 'text-amber-700 hover:bg-amber-50'
+                                className={`cursor-pointer underline decoration-wavy font-bold ${severityStyles} ${
+                                  isSelected ? 'bg-amber-100 text-amber-950' : ''
                                 } px-1 rounded-sm transition-all`}
-                                title="Ketuk untuk melihat saran perbaikan"
+                                title={`Ketuk untuk melihat saran perbaikan (${item.severity || 'Medium'} severity)`}
                               >
                                 {item.text}
+                                {item.severity === 'High' && <span className="ml-0.5 text-red-500 text-xs inline-block animate-bounce">⚠️</span>}
                               </span>
                               {isSelected && item.suggestions && item.suggestions.length > 0 && (
-                                <span className="absolute z-50 left-1/2 -translate-x-1/2 bottom-full mb-2 bg-white border border-[#1a1a1a] shadow-xl p-3 rounded-sm w-48 text-left space-y-2">
-                                  <span className="block text-[8px] font-sans font-bold uppercase tracking-wider opacity-40">Saran Perbaikan</span>
+                                <span className="absolute z-50 left-1/2 -translate-x-1/2 bottom-full mb-2 bg-white border border-[#1a1a1a] shadow-xl p-3 rounded-sm w-52 text-left space-y-2">
+                                  <div className="flex items-center justify-between border-b border-gray-100 pb-1">
+                                    <span className="block text-[8px] font-sans font-bold uppercase tracking-wider opacity-40">Saran Perbaikan</span>
+                                    {item.severity && (
+                                      <span className={`text-[7px] px-1 py-0.5 rounded-sm font-sans font-bold uppercase tracking-wider border ${
+                                        item.severity === 'Low' ? 'bg-emerald-50 text-emerald-700 border-emerald-200' :
+                                        item.severity === 'Medium' ? 'bg-amber-50 text-amber-700 border-amber-200' :
+                                        'bg-red-50 text-red-700 border-red-200 animate-pulse font-black'
+                                      }`}>
+                                        {item.severity === 'Low' ? 'RINGAN' : item.severity === 'Medium' ? 'SEDANG' : 'BERAT!'}
+                                      </span>
+                                    )}
+                                  </div>
+                                  {item.severity === 'High' && (
+                                    <div className="bg-red-50 border border-red-100 p-1.5 rounded-xs text-[9px] text-red-800 font-sans leading-tight">
+                                      ⚠️ <strong>Typo Berat:</strong> Memerlukan perhatian lebih karena perubahan ejaan signifikan.
+                                    </div>
+                                  )}
+                                  {item.severity === 'Low' && (
+                                    <div className="bg-emerald-50/70 border border-emerald-100 p-1.5 rounded-xs text-[9px] text-emerald-800 font-sans leading-tight">
+                                      ✨ <strong>Typo Ringan:</strong> Jarak ejaan minim. Disarankan otomatis.
+                                    </div>
+                                  )}
                                   <span className="flex flex-col gap-1">
                                     {item.suggestions.map((sugg, sIdx) => (
                                       <button
@@ -5038,15 +5431,26 @@ function MainApp() {
                             if (!item.isTypo) return null;
                             return (
                               <div key={idx} className="flex items-center justify-between p-3 bg-[#fdfbf7] border border-gray-100 rounded-sm text-xs font-sans">
-                                <div>
-                                  <span className="text-red-500 line-through mr-2 font-serif">{item.text}</span>
-                                  <span className="text-gray-400">→</span>
-                                  <span className="text-green-600 font-bold ml-2 font-serif">{item.bestSuggestion || '(Tidak ada saran)'}</span>
+                                <div className="flex items-center gap-2">
+                                  {item.severity && (
+                                    <span className={`text-[7px] px-1.5 py-0.5 rounded-sm font-bold uppercase tracking-wider border shrink-0 ${
+                                      item.severity === 'Low' ? 'bg-emerald-50 text-emerald-700 border-emerald-200' :
+                                      item.severity === 'Medium' ? 'bg-amber-50 text-amber-700 border-amber-200' :
+                                      'bg-red-50 text-red-700 border-red-200 font-black'
+                                    }`}>
+                                      {item.severity === 'Low' ? 'RINGAN' : item.severity === 'Medium' ? 'SEDANG' : 'BERAT'}
+                                    </span>
+                                  )}
+                                  <div className="leading-tight">
+                                    <span className="text-red-500 line-through mr-2 font-serif">{item.text}</span>
+                                    <span className="text-gray-400">→</span>
+                                    <span className="text-green-600 font-bold ml-2 font-serif">{item.bestSuggestion || '(Tidak ada saran)'}</span>
+                                  </div>
                                 </div>
                                 {item.bestSuggestion && (
                                   <button
                                     onClick={() => handleCorrectSingleWord(idx, item.bestSuggestion!)}
-                                    className="px-2 py-1 text-[9px] bg-white border border-gray-200 rounded hover:border-[#1a1a1a] font-bold uppercase tracking-wide transition-colors"
+                                    className="px-2 py-1 text-[9px] bg-white border border-gray-200 rounded hover:border-[#1a1a1a] font-bold uppercase tracking-wide transition-colors shrink-0"
                                   >
                                     Terapkan
                                   </button>
@@ -5491,6 +5895,13 @@ function MainApp() {
               <p className={`text-2xl font-black ${checkedResults.some(r => r.isTypo) ? 'text-amber-600' : 'text-green-600'}`}>
                 {checkedResults.filter(r => r.isTypo).length}
               </p>
+              {checkedResults.some(r => r.isTypo) && (
+                <div className="flex gap-2 justify-center text-[8px] mt-1 text-gray-500 font-bold font-sans">
+                  <span className="text-emerald-700">R: {checkedResults.filter(r => r.isTypo && r.severity === 'Low').length}</span>
+                  <span className="text-amber-700">S: {checkedResults.filter(r => r.isTypo && r.severity === 'Medium').length}</span>
+                  <span className="text-red-700">T: {checkedResults.filter(r => r.isTypo && r.severity === 'High').length}</span>
+                </div>
+              )}
             </div>
             <div className="bg-gray-50 border border-gray-100 p-4 rounded-sm">
               <p className="text-[9px] uppercase tracking-wider text-gray-400 font-bold font-sans mb-1">Skor Presisi</p>
@@ -5516,6 +5927,7 @@ function MainApp() {
                   <th className="py-2.5 w-12">No</th>
                   <th className="py-2.5">Kata Salah (Typo)</th>
                   <th className="py-2.5">Saran Koreksi</th>
+                  <th className="py-2.5">Keparahan</th>
                   <th className="py-2.5">Status</th>
                 </tr>
               </thead>
@@ -5525,6 +5937,17 @@ function MainApp() {
                     <td className="py-2.5 font-medium">{idx + 1}</td>
                     <td className="py-2.5 text-red-600 font-medium line-through">{item.text}</td>
                     <td className="py-2.5 text-green-600 font-black">{item.bestSuggestion || '(Tidak ada saran)'}</td>
+                    <td className="py-2.5">
+                      {item.severity && (
+                        <span className={`inline-block px-1.5 py-0.5 border rounded-sm text-[8px] font-bold uppercase tracking-wider ${
+                          item.severity === 'Low' ? 'bg-emerald-50 text-emerald-700 border-emerald-200' :
+                          item.severity === 'Medium' ? 'bg-amber-50 text-amber-700 border-amber-200' :
+                          'bg-red-50 text-red-700 border-red-200 font-extrabold'
+                        }`}>
+                          {item.severity === 'Low' ? 'Rendah' : item.severity === 'Medium' ? 'Sedang' : 'Tinggi ⚠️'}
+                        </span>
+                      )}
+                    </td>
                     <td className="py-2.5">
                       <span className="inline-block px-1.5 py-0.5 bg-amber-50 text-amber-700 border border-amber-100 rounded-sm text-[9px] font-bold uppercase tracking-wider">Perbaiki</span>
                     </td>
