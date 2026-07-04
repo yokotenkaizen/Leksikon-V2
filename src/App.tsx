@@ -22,6 +22,35 @@ const getLocalDateString = (d: Date = new Date()) => {
   return localDate.toISOString().split('T')[0];
 };
 
+// Words that should NEVER be suggested as correction candidates (conjunctions, prepositions, particles, and helping verbs/desires like 'ingin')
+const EXCLUDED_SUGGESTION_WORDS = new Set<string>();
+
+const RAW_EXCLUDED_WORDS_INPUT = [
+  // User supplied comprehensive conjunctions & connectors list
+  "dan", "serta", "atau", "tetapi", "melainkan", "sedangkan", "lalu", "kemudian", "setelah", "sebelum", "sehabis", "sejak", "semenjak", "ketika", "tatkala", "sewaktu", "sementara", "seraya", "sambil", "selagi", "selama", "serentak", "boro-boro", "demi", "bagi", "untuk", "guna", "agar", "supaya", "biar", "sebab", "karena", "oleh karena", "oleh sebab", "sehingga", "sampai", "sampai-sampai", "maka", "makanya", "akibatnya", "jika", "jikalau", "apabila", "asalkan", "kalau", "bilamana", "manakala", "sekiranya", "andaikata", "umpamanya", "seandainya", "sungguhpun", "meskipun", "biarpun", "sekalipun", "walaupun", "kendatipun", "bagaimanapun", "seperti", "bagai", "bagaikan", "seolah-olah", "seakan-akan", "penata", "mirip", "serupa", "padahal", "melainkan juga", "bahwa", "jangankan", "malahan", "bahkan", "lagipula", "apalagi", "sesudah itu", "setelah itu", "selanjutnya", "berikutnya", "selain itu", "di samping itu", "sebaliknya", "sebaliknya dari", "kontras dengan", "dalam hal ini", "tambahan pula", "oleh karena itu", "oleh sebab itu", "dengan demikian", "jadi", "maka dari itu", "kesimpulannya", "ringkasnya", "pendek kata", "tatkala", "manakala", "tatkala mana", "seraya dengan", "beriringan dengan", "berbarengan dengan", "selaras dengan", "sejalan dengan", "berhubung", "berhubung karena", "dikarenakan", "gara-gara", "lantaran", "saking", "imbasnya", "dampaknya", "alhasil", "hasilnya", "jadinya", "niscaya", "pastinya", "dampaknya", "makanya", "akibat dari", "jika saja", "kalau saja", "andai", "andai saja", "asalkan bisa", "sekiranya kalau", "andaikata pun", "misal", "misalkan", "semisal", "seumpama", "asalkan mau", "walau", "maski", "biar pun", "sungguh pun", "biar begitu", "walau begitu", "meskipun demikian", "biarpun demikian", "sekalipun demikian", "kendatipun demikian", "bagaimanapun juga", "namun", "namun demikian", "akan tetapi", "sebaliknya justru", "melainkan hanyalah", "melainkan melulu", "ibarat", "ibarat kata", "layaknya", "laksana", "sebagaimana", "sewarna dengan", "sepadan dengan", "persis seperti", "seolah", "seakan", "tampaknya seperti", "nyatanya", "faktanya", "sebenarnya", "sesungguhnya", "bahwasanya", "adapun", "mengenai", "perihal", "tentang", "alih-alih", "bukannya", "daripada", "ketimbang", "jangankan pun", "jangankan jangankan", "boro-boro pula", "jangankan lagi", "malah", "bahkan pun", "malahan pula", "tak hanya", "bukan hanya", "melainkan juga", "tidak cuma", "tetapi juga", "melainkan pula", "lagian", "lebih-lebih", "apa lagi", "malahan lebih", "bahkan lebih", "terlebih", "terlebih lagi", "sesudah", "sehabis itu", "seusai", "seusai itu", "setamat", "setamatnya", "peninggal", "sepeninggal", "sekembalinya", "setelahnya", "lalunya", "lantas", "habis itu", "barulah", "sesudahnya", "berikutnya lagi", "setelah ini", "sesudah ini", "lanjutnya", "seterusnya", "lalu kemudian", "sesudah demikian", "bermula dari", "awalnya", "mula-mula", "pertama-tama", "kedua", "ketiga", "selanjutnya pula", "pada akhirnya", "akhirnya", "pamungkasnya", "sebagai penutup", "menutup hal ini", "pendeknya", "ringkas kata", "walhasil", "konklusinya", "rupa-rupanya", "tampaknya", "kiranya", "sedianya", "seyogianya", "sepatutnya", "seharusnya", "semestinya", "lagipula pula", "tambahan lagi", "di samping hal tersebut", "selain dari itu", "bukan hanya itu", "tak kalah penting", "begitu pula", "begitu juga", "demikian pula", "demikian juga", "sama halnya", "serupa dengan itu", "dalam pada itu", "sementara itu", "pada saat yang sama", "pada waktu yang bersamaan", "dalam waktu bersamaan", "seiring itu", "seiring dengan itu", "sejalan dengan hal itu", "bertepatan dengan", "semenjak itu", "sejak saat itu", "sejak waktu itu", "sehabis kejadian itu", "pasca", "pasca-kejadian", "pra", "sebelum itu", "menjelang", "menjelang itu", "seketika", "seketika itu", "serta-merta", "tiba-tiba", "mendadak", "sekonyong-konyong", "mumpung", "mumpung masih", "selagi bisa", "selama masih", "sepanjang", "sepanjang hayat", "seumur", "seumur-umur", "demi untuk", "buat", "demi menjaga", "guna mencukupi", "agar supaya", "biar tidak", "supaya jangan", "agar jangan", "melainkan hanya", "hanya saja", "akan tetapi justru", "tapi", "melainkan justru", "namun sebaliknya", "sebaliknya malah",
+  
+  // Other prepositions, auxiliary words, modals, desires & common pronouns
+  "di", "ke", "dari", "pada", "dalam", "untuk", "dengan", "oleh", "tentang", "sebagai", 
+  "bagi", "atas", "bawah", "kepada", "terhadap", "buat", "guna", "sampai", "hingga", "demi", 
+  "menurut", "bagaikan", "seperti", "mengenai", "antara", "melalui", "secara",
+  "ingin", "mau", "akan", "bisa", "dapat", "telah", "sudah", "sedang", "belum", "harus", 
+  "segera", "agar", "boleh", "patut", "mesti", "perlu", "bukan", "tidak", "tak", "ada",
+  "yang", "yg", "ini", "itu", "dia", "ia", "mereka", "saya", "kamu", "aku", "kami", "kita", 
+  "anda", "nya", "pun", "lah", "kah", "tapi", "saja", "juga", "hanya", "pula", "dong", "sih", 
+  "deh", "kok", "loh", "tah", "siapa", "apa", "mengapa", "bagaimana", "kenapa"
+];
+
+RAW_EXCLUDED_WORDS_INPUT.forEach(phrase => {
+  const pLower = phrase.toLowerCase().trim();
+  EXCLUDED_SUGGESTION_WORDS.add(pLower);
+  // Break down multi-word phrases so that their individual component words are also excluded
+  pLower.split(/\s+/).forEach(word => {
+    if (word) {
+      EXCLUDED_SUGGESTION_WORDS.add(word);
+    }
+  });
+});
+
 // Calculate Levenshtein distance between two strings
 const levenshteinDistance = (s1: string, s2: string): number => {
   const m = s1.length;
@@ -448,6 +477,12 @@ function MainApp() {
     initialWords.forEach(w => validWordsSet.add(w.word.toLowerCase().trim()));
 
     const typosMap = new Map<string, string>();
+    initialTypos.forEach(t => {
+      const tKey = t.typo.toLowerCase().trim();
+      const cVal = t.correction.toLowerCase().trim();
+      typosMap.set(tKey, cVal);
+      validWordsSet.add(cVal);
+    });
     typos.forEach(t => {
       const tKey = t.typo.toLowerCase().trim();
       const cVal = t.correction.toLowerCase().trim();
@@ -533,7 +568,7 @@ function MainApp() {
           // Process YYYY-MM-DD grouping
           const dateStr = getLocalDateString(d);
           groups[dateStr] = (groups[dateStr] || 0) + 1;
-        } catch (e) {
+        } catch {
           // ignore parsing error
         }
       }
@@ -1328,19 +1363,24 @@ function MainApp() {
   const runStandardCheckAndSave = async (rawText: string, emailStr: string, isBypass: boolean) => {
     setIsAnalyzing(true);
     const validWordsSet = new Set<string>();
-    words.forEach(w => validWordsSet.add(w.word.toLowerCase().trim()));
-    initialWords.forEach(w => validWordsSet.add(w.word.toLowerCase().trim()));
-
-    // Synchronize correct words and build typo direct correction map
-    const typosMap = new Map<string, string>();
-    typos.forEach(t => {
-      const tKey = t.typo.toLowerCase().trim();
-      const cVal = t.correction.toLowerCase().trim();
-      typosMap.set(tKey, cVal);
-      // Synchronize typo correction forms into valid KBBI set
-      validWordsSet.add(cVal);
+    const dictionaryWordsSet = new Set<string>();
+    const rootCategories = new Map<string, string>();
+    
+    // Add dictionary words
+    words.forEach(w => {
+      const wd = w.word.toLowerCase().trim();
+      validWordsSet.add(wd);
+      dictionaryWordsSet.add(wd);
+      if (w.category) rootCategories.set(wd, w.category);
+    });
+    initialWords.forEach(w => {
+      const wd = w.word.toLowerCase().trim();
+      validWordsSet.add(wd);
+      dictionaryWordsSet.add(wd);
+      if (w.category) rootCategories.set(wd, w.category);
     });
 
+    // Standard Indonesian connecting structures for POS categories
     const COMMON_INDONESIAN = [
       'dan', 'atau', 'di', 'ke', 'dari', 'yang', 'yg', 'ini', 'itu', 'dengan', 
       'untuk', 'pada', 'bagi', 'oleh', 'tentang', 'sebagai', 'ia', 'mereka', 
@@ -1354,19 +1394,301 @@ function MainApp() {
       'bagaimana', 'mengapa', 'kenapa', 'sebab', 'maka', 'sehingga', 'lalu',
       'kemudian', 'kok', 'sih', 'dong', 'kan', 'deh', 'loh', 'oh', 'ah', 'wah', 'hal'
     ];
-    COMMON_INDONESIAN.forEach(w => validWordsSet.add(w.toLowerCase().trim()));
+    COMMON_INDONESIAN.forEach(w => {
+      const wd = w.toLowerCase().trim();
+      validWordsSet.add(wd);
+      dictionaryWordsSet.add(wd);
+      if (!rootCategories.has(wd)) {
+        if (['di', 'ke', 'dari', 'pada', 'bagi', 'untuk', 'dengan', 'dalam', 'atas', 'bawah'].includes(wd)) {
+          rootCategories.set(wd, 'Preposisi');
+        } else if (['dan', 'atau', 'karena', 'namun', 'tetapi', 'bahwa', 'jika', 'bila', 'serta', 'maka', 'sehingga', 'lalu', 'kemudian'].includes(wd)) {
+          rootCategories.set(wd, 'Konjungsi');
+        } else if (['sangat', 'amat', 'sekali', 'lebih', 'paling', 'tidak', 'belum', 'sudah', 'sedang', 'akan', 'bukan'].includes(wd)) {
+          rootCategories.set(wd, 'Adverba');
+        } else if (['saya', 'aku', 'kamu', 'anda', 'dia', 'ia', 'mereka', 'kami', 'kita'].includes(wd)) {
+          rootCategories.set(wd, 'Pronomina');
+        }
+      }
+    });
+
+    // Add standard correction words from typos and initialTypos as valid words
+    initialTypos.forEach(t => {
+      const corrL = t.correction.toLowerCase().trim();
+      validWordsSet.add(corrL);
+    });
+    typos.forEach(t => {
+      const corrL = t.correction.toLowerCase().trim();
+      validWordsSet.add(corrL);
+    });
+
+    // Build map of typos from both database collection (state) and initialTypos
+    const typosMap = new Map<string, string>();
+    initialTypos.forEach(t => {
+      const typoL = t.typo.toLowerCase().trim();
+      const corrL = t.correction.trim();
+      if (typoL !== corrL.toLowerCase().trim()) {
+        typosMap.set(typoL, corrL);
+      }
+    });
+    typos.forEach(t => {
+      const typoL = t.typo.toLowerCase().trim();
+      const corrL = t.correction.trim();
+      if (typoL !== corrL.toLowerCase().trim()) {
+        typosMap.set(typoL, corrL);
+      }
+    });
+
+    // Explicit 12 Typos with high-priority mappings
+    const SPECIFIC_CORRECTIONS: [string, string][] = [
+      ['aktifitas', 'aktivitas'],
+      ['apotik', 'apotek'],
+      ['nasehat', 'nasihat'],
+      ['ijin', 'izin'],
+      ['resiko', 'risiko'],
+      ['kwalitas', 'kualitas'],
+      ['analisa', 'analisis'],
+      ['nafas', 'napas'],
+      ['praktek', 'praktik'],
+      ['jadual', 'jadwal'],
+      ['survey', 'survei'],
+      ['sekedar', 'sekadar']
+    ];
+    SPECIFIC_CORRECTIONS.forEach(([typo, correction]) => {
+      typosMap.set(typo, correction);
+    });
+
+    // Trie Node and KBBI_Trie implementation for fast lookup of valid words ("Pengecekan Hash/Trie")
+    class TrieNode {
+      children: Map<string, TrieNode> = new Map();
+      isEndOfWord = false;
+    }
+
+    class KBBITrie {
+      root = new TrieNode();
+
+      insert(word: string) {
+        let node = this.root;
+        for (const char of word) {
+          if (!node.children.has(char)) {
+            node.children.set(char, new TrieNode());
+          }
+          node = node.children.get(char)!;
+        }
+        node.isEndOfWord = true;
+      }
+
+      search(word: string): boolean {
+        let node = this.root;
+        for (const char of word) {
+          if (!node.children.has(char)) return false;
+          node = node.children.get(char)!;
+        }
+        return node.isEndOfWord;
+      }
+    }
+
+    const kbbiTrie = new KBBITrie();
+    validWordsSet.forEach(word => kbbiTrie.insert(word));
+
+    // Context-Aware Morphological Parser (Indonesian Stemmer / Decomposer)
+    const checkWordValidWithMorphology = (w: string, validSet: Set<string>): { isValid: boolean; stem?: string } => {
+      const wClean = w.toLowerCase().trim();
+      if (validSet.has(wClean) || kbbiTrie.search(wClean)) {
+        return { isValid: true, stem: wClean };
+      }
+
+      // Check hyphenated/double words (e.g., "buku-buku", "anak-anak")
+      if (wClean.includes('-')) {
+        const parts = wClean.split('-');
+        const partChecks = parts.map(p => checkWordValidWithMorphology(p, validSet));
+        if (partChecks.every(pc => pc.isValid)) {
+          return { isValid: true, stem: wClean };
+        }
+      }
+
+      // a) Strip clitics (trailing end)
+      const clitics = ['nya', 'lah', 'kah', 'pun', 'ku', 'mu'];
+      for (const clitic of clitics) {
+        if (wClean.endsWith(clitic) && wClean.length > clitic.length + 2) {
+          const stripped = wClean.slice(0, -clitic.length);
+          if (validSet.has(stripped) || kbbiTrie.search(stripped)) {
+            return { isValid: true, stem: stripped };
+          }
+          const sub = checkWordValidWithMorphology(stripped, validSet);
+          if (sub.isValid) {
+            return { isValid: true, stem: sub.stem };
+          }
+        }
+      }
+
+      // b) Strip standard suffixes
+      const suffixes = ['kan', 'an', 'i'];
+      for (const suffix of suffixes) {
+        if (wClean.endsWith(suffix) && wClean.length > suffix.length + 2) {
+          const stripped = wClean.slice(0, -suffix.length);
+          if (validSet.has(stripped) || kbbiTrie.search(stripped)) {
+            return { isValid: true, stem: stripped };
+          }
+          const sub = checkWordValidWithMorphology(stripped, validSet);
+          if (sub.isValid) {
+            return { isValid: true, stem: sub.stem };
+          }
+        }
+      }
+
+      // c) Strip simple passive & aspectual prefixes (di-, ter-, se-, ke-)
+      const simplePrefixes = ['di', 'ter', 'se', 'ke'];
+      for (const pref of simplePrefixes) {
+        if (wClean.startsWith(pref) && wClean.length > pref.length + 2) {
+          const stripped = wClean.slice(pref.length);
+          if (validSet.has(stripped) || kbbiTrie.search(stripped)) {
+            return { isValid: true, stem: stripped };
+          }
+          const sub = checkWordValidWithMorphology(stripped, validSet);
+          if (sub.isValid) {
+            return { isValid: true, stem: sub.stem };
+          }
+        }
+      }
+
+      // d) Strip ber- / be- / bel- prefixes
+      if (wClean.startsWith('ber') && wClean.length > 5) {
+        const stripped = wClean.slice(3);
+        if (validSet.has(stripped) || kbbiTrie.search(stripped)) return { isValid: true, stem: stripped };
+        const sub = checkWordValidWithMorphology(stripped, validSet);
+        if (sub.isValid) return { isValid: true, stem: sub.stem };
+      }
+      if (wClean.startsWith('be') && wClean.length > 4) {
+        const stripped = wClean.slice(2);
+        if (validSet.has(stripped) || kbbiTrie.search(stripped)) return { isValid: true, stem: stripped };
+        const sub = checkWordValidWithMorphology(stripped, validSet);
+        if (sub.isValid) return { isValid: true, stem: sub.stem };
+      }
+      if (wClean.startsWith('bel') && wClean.length > 5) {
+        const stripped = wClean.slice(3);
+        if (validSet.has(stripped) || kbbiTrie.search(stripped)) return { isValid: true, stem: stripped };
+        const sub = checkWordValidWithMorphology(stripped, validSet);
+        if (sub.isValid) return { isValid: true, stem: sub.stem };
+      }
+
+      // e) Strip active nasal prefixes (me-, pe-) with morphophonemic rules
+      const nasals = ['me', 'pe'];
+      for (const n of nasals) {
+        if (wClean.startsWith(n) && wClean.length > n.length + 2) {
+          const base = wClean.slice(n.length);
+
+          if (base.startsWith('nge') && base.length > 3) {
+            const stripped = base.slice(3);
+            if (validSet.has(stripped) || kbbiTrie.search(stripped)) return { isValid: true, stem: stripped };
+          }
+
+          if (base.startsWith('ny') && base.length > 2) {
+            const withS = 's' + base.slice(2);
+            if (validSet.has(withS) || kbbiTrie.search(withS)) return { isValid: true, stem: withS };
+            const sub = checkWordValidWithMorphology(withS, validSet);
+            if (sub.isValid) return { isValid: true, stem: sub.stem };
+          }
+
+          if (base.startsWith('m') && base.length > 1) {
+            const withP = 'p' + base.slice(1);
+            if (validSet.has(withP) || kbbiTrie.search(withP)) return { isValid: true, stem: withP };
+            const sub1 = checkWordValidWithMorphology(withP, validSet);
+            if (sub1.isValid) return { isValid: true, stem: sub1.stem };
+
+            const plainM = base;
+            if (validSet.has(plainM) || kbbiTrie.search(plainM)) return { isValid: true, stem: plainM };
+            const sub2 = checkWordValidWithMorphology(plainM, validSet);
+            if (sub2.isValid) return { isValid: true, stem: sub2.stem };
+          }
+
+          if (base.startsWith('n') && base.length > 1) {
+            const withT = 't' + base.slice(1);
+            if (validSet.has(withT) || kbbiTrie.search(withT)) return { isValid: true, stem: withT };
+            const sub1 = checkWordValidWithMorphology(withT, validSet);
+            if (sub1.isValid) return { isValid: true, stem: sub1.stem };
+
+            const plainN = base;
+            if (validSet.has(plainN) || kbbiTrie.search(plainN)) return { isValid: true, stem: plainN };
+            const sub2 = checkWordValidWithMorphology(plainN, validSet);
+            if (sub2.isValid) return { isValid: true, stem: sub2.stem };
+          }
+
+          if (base.startsWith('ng') && base.length > 2) {
+            const withK = 'k' + base.slice(2);
+            if (validSet.has(withK) || kbbiTrie.search(withK)) return { isValid: true, stem: withK };
+            const sub1 = checkWordValidWithMorphology(withK, validSet);
+            if (sub1.isValid) return { isValid: true, stem: sub1.stem };
+
+            const plainNg = base;
+            if (validSet.has(plainNg) || kbbiTrie.search(plainNg)) return { isValid: true, stem: plainNg };
+            const sub2 = checkWordValidWithMorphology(plainNg, validSet);
+            if (sub2.isValid) return { isValid: true, stem: sub2.stem };
+          }
+
+          const singleMe = base;
+          if (validSet.has(singleMe) || kbbiTrie.search(singleMe)) return { isValid: true, stem: singleMe };
+          const sub = checkWordValidWithMorphology(singleMe, validSet);
+          if (sub.isValid) return { isValid: true, stem: sub.stem };
+        }
+      }
+
+      return { isValid: false };
+    };
 
     const tokens = rawText.split(/([a-zA-ZáéíóúÁÉÍÓÚ'-]+)/);
     
-    const results: CheckedWord[] = tokens.map((token) => {
+    interface WordTokenInfo {
+      tokenIndex: number;
+      text: string;
+      stripped: string;
+      isCapitalized: boolean;
+      isAllCaps: boolean;
+    }
+    const wordTokens: WordTokenInfo[] = [];
+    tokens.forEach((token, idx) => {
       const isWord = /^[a-zA-ZáéíóúÁÉÍÓÚ'-]+$/.test(token) && token.length > 1;
-      if (!isWord) {
+      if (isWord) {
+        wordTokens.push({
+          tokenIndex: idx,
+          text: token,
+          stripped: token.toLowerCase(),
+          isCapitalized: token[0] === token[0].toUpperCase(),
+          isAllCaps: token === token.toUpperCase()
+        });
+      }
+    });
+
+    const wordTokenIdxMap = new Map<number, number>();
+    wordTokens.forEach((wt, i) => {
+      wordTokenIdxMap.set(wt.tokenIndex, i);
+    });
+
+    const isSentenceStart = (wtIndex: number): boolean => {
+      if (wtIndex === 0) return true;
+      const prevWt = wordTokens[wtIndex - 1];
+      const wt = wordTokens[wtIndex];
+      for (let j = prevWt.tokenIndex + 1; j < wt.tokenIndex; j++) {
+        if (tokens[j].includes('.') || tokens[j].includes('!') || tokens[j].includes('?')) {
+          return true;
+        }
+      }
+      return false;
+    };
+
+    const results: CheckedWord[] = tokens.map((token, idx) => {
+      if (!wordTokenIdxMap.has(idx)) {
         return { text: token, isWord: false, isTypo: false };
       }
 
-      const stripped = token.toLowerCase();
+      const wtIdx = wordTokenIdxMap.get(idx)!;
+      const wt = wordTokens[wtIdx];
+      const stripped = wt.stripped;
 
-      // casing format helper
+      // Ensure that conjunctions, prepositions, particles, or common helper/connector words (including "agar" and "segera") are never marked as typos
+      if (EXCLUDED_SUGGESTION_WORDS.has(stripped.toLowerCase().trim())) {
+        return { text: token, isWord: true, isTypo: false };
+      }
+
       const formatCase = (suggWord: string) => {
         if (token === token.toUpperCase()) {
           return suggWord.toUpperCase();
@@ -1379,31 +1701,68 @@ function MainApp() {
       // 1. Direct typo check from the Admin typos database
       if (typosMap.has(stripped)) {
         const correctForm = typosMap.get(stripped)!;
-        const formatted = formatCase(correctForm);
-        return {
-          text: token,
-          isWord: true,
-          isTypo: true,
-          bestSuggestion: formatted,
-          suggestions: [formatted]
-        };
+        const correctFormLower = correctForm.toLowerCase().trim();
+        if (dictionaryWordsSet.has(correctFormLower) && !EXCLUDED_SUGGESTION_WORDS.has(correctFormLower)) {
+          const formatted = formatCase(correctForm);
+          const dist = getDistance(stripped, correctForm);
+          const severity: 'Low' | 'Medium' | 'High' = dist <= 1 ? 'Low' : dist === 2 ? 'Medium' : 'High';
+
+          return {
+            text: token,
+            isWord: true,
+            isTypo: true,
+            bestSuggestion: formatted,
+            suggestions: [formatted],
+            severity
+          };
+        }
       }
 
-      // 2. Exact match in standard/synchronized KBBI vocabulary
-      if (validWordsSet.has(stripped)) {
+      // 2. Proper Noun check
+      const startSentence = isSentenceStart(wtIdx);
+      let isProperNoun = false;
+      if (wt.isCapitalized) {
+        if (!startSentence) {
+          isProperNoun = true;
+        } else {
+          const nextWt = wtIdx < wordTokens.length - 1 ? wordTokens[wtIdx + 1] : null;
+          if (nextWt && nextWt.isCapitalized) {
+            isProperNoun = true;
+          }
+        }
+      }
+
+      if (isProperNoun) {
         return { text: token, isWord: true, isTypo: false };
       }
 
-      // 3. Distance fallback against standardized words
+      // 3. [Pengecekan Hash/Trie] - Ada di Kamus database kamus leksikon
+      const isDirectMatch = kbbiTrie.search(stripped) || validWordsSet.has(stripped);
+      const morphResult = checkWordValidWithMorphology(stripped, validWordsSet);
+      
+      if (isDirectMatch || morphResult.isValid) {
+        return { text: token, isWord: true, isTypo: false };
+      }
+
+      // 4. [Levenshtein Distance] - Cari kata di kamus dengan jarak terdekat (bobot < 3)
       const candidates: { word: string; dist: number }[] = [];
-      validWordsSet.forEach(vWord => {
-        if (Math.abs(vWord.length - stripped.length) <= 3) {
+      dictionaryWordsSet.forEach(vWord => {
+        const vWordLower = vWord.toLowerCase().trim();
+        if (EXCLUDED_SUGGESTION_WORDS.has(vWordLower)) {
+          return; // Skip conjunctions, prepositions, or helper/connecting words as suggestions
+        }
+        if (Math.abs(vWord.length - stripped.length) < 3) {
           const dist = getDistance(stripped, vWord);
-          if (dist <= 3) {
+          if (dist < 3) { // (bobot < 3)
             candidates.push({ word: vWord, dist });
           }
         }
       });
+
+      if (candidates.length === 0) {
+        // Jika tidak ada di kamus dan tidak ada dengan jarak terdekat (bobot < 3) maka tidak perlu diberikan saran koreksi
+        return { text: token, isWord: true, isTypo: false };
+      }
 
       candidates.sort((x, y) => {
         if (x.dist !== y.dist) return x.dist - y.dist;
@@ -1412,12 +1771,35 @@ function MainApp() {
 
       const listSugg = candidates.slice(0, 3).map(c => formatCase(c.word));
 
+      // --- QC (QUALITY CONTROL) VALIDATION LAYER ---
+      // Ensure no suggestions contain excluded words (conjunctions, prepositions, or specific excluded terms)
+      const qcFilteredSuggestions = listSugg.filter(sugg => {
+        const suggLower = sugg.toLowerCase().trim();
+        return !EXCLUDED_SUGGESTION_WORDS.has(suggLower);
+      });
+
+      // Double check that the input word itself is not in the excluded list
+      if (EXCLUDED_SUGGESTION_WORDS.has(stripped.toLowerCase().trim())) {
+        return { text: token, isWord: true, isTypo: false };
+      }
+
+      // If no suggestions survive the QC filter, cancel the typo flagging
+      if (qcFilteredSuggestions.length === 0) {
+        return { text: token, isWord: true, isTypo: false };
+      }
+
+      let severity: 'Low' | 'Medium' | 'High' = 'High';
+      const bestDist = candidates[0]?.dist ?? 3;
+      if (bestDist === 1) severity = 'Low';
+      else if (bestDist === 2) severity = 'Medium';
+
       return {
         text: token,
         isWord: true,
         isTypo: true,
-        bestSuggestion: listSugg[0] || undefined,
-        suggestions: listSugg
+        bestSuggestion: qcFilteredSuggestions[0] || undefined,
+        suggestions: qcFilteredSuggestions,
+        severity
       };
     });
 
@@ -1457,512 +1839,6 @@ function MainApp() {
     } catch (error: any) {
       console.warn("Format error writing stats:", error);
     }
-  };
-
-  // Run Typo Check Analyzers (Context-Aware Morphological, Proper Noun, & DB-Driven Typo Check)
-  const handleCheckText = (rawText = typoText) => {
-    if (!rawText.trim()) {
-      setCheckedResults([]);
-      return;
-    }
-    
-    setIsAnalyzing(true);
-    const validWordsSet = new Set<string>();
-    const rootCategories = new Map<string, string>();
-    
-    // Add dictionary words
-    words.forEach(w => {
-      const wd = w.word.toLowerCase().trim();
-      validWordsSet.add(wd);
-      if (w.category) rootCategories.set(wd, w.category);
-    });
-    initialWords.forEach(w => {
-      const wd = w.word.toLowerCase().trim();
-      validWordsSet.add(wd);
-      if (w.category) rootCategories.set(wd, w.category);
-    });
-
-    // Explicit valid words list to prevent false positives in sample sentences and general Indonesian text
-    const ADDITIONAL_VALID_WORDS = [
-      // 12 Standard Indonesian spelling corrections (Baku variations)
-      'aktivitas', 'apotek', 'nasihat', 'izin', 'risiko', 'kualitas', 'analisis', 'napas', 'praktik', 'jadwal', 'survei', 'sekadar',
-
-      // Sentence 1 words
-      'pagi', 'itu', 'raka', 'berangkat', 'ke', 'sekolah', 'dengan', 'semangat', 'tinggi', 'untuk', 'mengikuti', 'pramuka', 'ia', 'berharap', 'bisa', 'memenangkan', 'lomba', 'yang', 'akan', 'diadakan', 'sore', 'nanti',
-      
-      // Sentence 2 words
-      'di', 'perjalanan', 'berhenti', 'membeli', 'perban', 'bagi', 'temannya', 'terluka', 'penjaga', 'toko', 'melayaninya', 'ramah', 'dan', 'cepat',
-      
-      // Sentence 3 words
-      'setelah', 'tiba', 'guru', 'memberikan', 'kepada', 'seluruh', 'siswa', 'agar', 'selalu', 'disiplin', 'mendengarkan', 'penuh', 'perhatian',
-      
-      // Sentence 4 words
-      'saat', 'latihan', 'berlangsung', 'setiap', 'peserta', 'harus', 'meminta', 'sebelum', 'menggunakan', 'perlengkapan', 'khusus', 'aturan', 'dibuat', 'demi', 'keamanan', 'bersama',
-      
-      // Sentence 5 words
-      'salah', 'satu', 'teman', 'melakukan', 'kesalahan', 'fatal', 'karena', 'mengabaikan', 'sudah', 'dijelaskan', 'sebelumnya', 'akibatnya', 'kelompok', 'mereka', 'kehilangan', 'beberapa', 'poin',
-      
-      // Sentence 6 words
-      'menjelang', 'siang', 'para', 'rapat', 'kecil', 'membahas', 'kegiatan', 'telah', 'berjalan', 'saling', 'memberikan', 'pendapat', 'masukan',
-      
-      // Sentence 7 words
-      'kemudian', 'membantu', 'gurunya', 'terhadap', 'hasil', 'perlombaan', 'sementara', 'data', 'tersebut', 'digunakan', 'menentukan', 'strategi', 'berikutnya',
-      
-      // Sentence 8 words
-      'ketika', 'hujan', 'turun', 'segera', 'mencari', 'baru', 'aula', 'lebih', 'nyaman', 'menunggu', 'cuaca', 'membaik', 'sambil', 'bercanda',
-      
-      // Sentence 9 words
-      'seorang', 'pelatih', 'tamu', 'datang', 'keterampilan', 'bertahan', 'hidup', 'alam', 'terbuka', 'semua', 'terlihat', 'antusias', 'penjelasannya',
-      
-      // Sentence 10 words
-      'pada', 'sesi', 'diminta', 'membuat', 'esok', 'hari', 'menyusun', 'rencana', 'rinci', 'teratur',
-      
-      // Sentence 11 words
-      'acara', 'selesai', 'panitia', 'sederhana', 'mengenai', 'kepuasan', 'hasilnya', 'menunjukkan', 'bahwa', 'sebagian', 'besar', 'merasa', 'senang',
-      
-      // Sentence 12 words
-      'pulang', 'kepala', 'pesan', 'penutup', 'pun', 'kembali', 'rumah', 'pengalaman', 'berharga',
-
-      // Extra common general root words and derivatives to make spelling checker robust
-      'baca', 'tulis', 'kerja', 'main', 'makan', 'minum', 'tidur', 'pikir', 'buat', 'lihat', 'dengar', 'bicara', 'tanya', 'jawab', 'pilih',
-      'buku', 'pena', 'meja', 'kursi', 'pintu', 'jendela', 'lampu', 'komputer', 'telepon', 'mobil', 'motor', 'sepeda', 'baju', 'celana', 'sepatu', 'tas', 'dompet', 'uang', 'peta', 'arah',
-      'utara', 'selatan', 'timur', 'barat', 'atas', 'bawah', 'depan', 'belakang', 'samping', 'luar', 'dalam', 'tengah', 'antara',
-      'sehat', 'sakit', 'kuat', 'lemah', 'bersih', 'kotor', 'indah', 'bagus', 'jelek', 'baik', 'jahat', 'kasar', 'halus', 'lembut',
-      'merah', 'biru', 'kuning', 'hijau', 'putih', 'hitam', 'cokelat', 'abu', 'warna', 'angka', 'satu', 'dua', 'tiga', 'empat', 'lima',
-      'enam', 'tujuh', 'delapan', 'sembilan', 'sepuluh', 'nol', 'ratus', 'ribu', 'juta', 'banyak', 'beberapa', 'semua', 'sedikit',
-      'provinsi', 'kota', 'desa', 'daerah', 'wilayah', 'negara', 'dunia', 'rakyat', 'pemerintah', 'presiden', 'menteri', 'masyarakat',
-      'belajar', 'mengajar', 'perkembangan', 'pertumbuhan', 'keamanan', 'kenyamanan', 'keadilan', 'kemakmuran', 'kesehatan', 'pendidikan'
-    ];
-    ADDITIONAL_VALID_WORDS.forEach(w => {
-      validWordsSet.add(w.toLowerCase().trim());
-    });
-
-    // Standard Indonesian connecting structures
-    const COMMON_INDONESIAN = [
-      'dan', 'atau', 'di', 'ke', 'dari', 'yang', 'yg', 'ini', 'itu', 'dengan', 
-      'untuk', 'pada', 'bagi', 'oleh', 'tentang', 'sebagai', 'ia', 'mereka', 
-      'kami', 'kita', 'saya', 'aku', 'kamu', 'engkau', 'anda', 'dia', 'nya', 
-      'adalah', 'yaitu', 'yakni', 'karena', 'juga', 'saja', 'telah', 'sudah', 
-      'sedang', 'akan', 'bisa', 'dapat', 'namun', 'tetapi', 'bahwa', 'apakah', 
-      'siapa', 'apa', 'sejak', 'hanya', 'serta', 'jika', 'bila', 'pula', 
-      'pun', 'lah', 'kah', 'tapi', 'tidak', 'tak', 'belum', 'ada', 'dalam', 
-      'luar', 'atas', 'bawah', 'sangat', 'amat', 'sekali', 'lebih', 'paling',
-      'bukan', 'maupun', 'secara', 'setiap', 'banyak', 'beberapa', 'semua',
-      'bagaimana', 'mengapa', 'kenapa', 'sebab', 'maka', 'sehingga', 'lalu',
-      'kemudian', 'kok', 'sih', 'dong', 'kan', 'deh', 'loh', 'oh', 'ah', 'wah', 'hal'
-    ];
-    COMMON_INDONESIAN.forEach(w => {
-      const wd = w.toLowerCase().trim();
-      validWordsSet.add(wd);
-      // Give these connection categories if they don't have them
-      if (!rootCategories.has(wd)) {
-        if (['di', 'ke', 'dari', 'pada', 'bagi', 'untuk', 'dengan', 'dalam', 'atas', 'bawah'].includes(wd)) {
-          rootCategories.set(wd, 'Preposisi');
-        } else if (['dan', 'atau', 'karena', 'namun', 'tetapi', 'bahwa', 'jika', 'bila', 'serta', 'maka', 'sehingga', 'lalu', 'kemudian'].includes(wd)) {
-          rootCategories.set(wd, 'Konjungsi');
-        } else if (['sangat', 'amat', 'sekali', 'lebih', 'paling', 'tidak', 'belum', 'sudah', 'sedang', 'akan', 'bukan'].includes(wd)) {
-          rootCategories.set(wd, 'Adverba');
-        } else if (['saya', 'aku', 'kamu', 'anda', 'dia', 'ia', 'mereka', 'kami', 'kita'].includes(wd)) {
-          rootCategories.set(wd, 'Pronomina');
-        }
-      }
-    });
-
-    // Build map of typos from both database collection (state) and initialTypos
-    const typoCorrectionMap = new Map<string, string>();
-    initialTypos.forEach(t => {
-      const typoL = t.typo.toLowerCase().trim();
-      const corrL = t.correction.trim();
-      if (typoL !== corrL.toLowerCase().trim()) {
-        typoCorrectionMap.set(typoL, corrL);
-      }
-    });
-    typos.forEach(t => {
-      const typoL = t.typo.toLowerCase().trim();
-      const corrL = t.correction.trim();
-      if (typoL !== corrL.toLowerCase().trim()) {
-        typoCorrectionMap.set(typoL, corrL);
-      }
-    });
-
-    // Explicit 12 Typos with high-priority mappings
-    const SPECIFIC_CORRECTIONS: [string, string][] = [
-      ['aktifitas', 'aktivitas'],
-      ['apotik', 'apotek'],
-      ['nasehat', 'nasihat'],
-      ['ijin', 'izin'],
-      ['resiko', 'risiko'],
-      ['kwalitas', 'kualitas'],
-      ['analisa', 'analisis'],
-      ['nafas', 'napas'],
-      ['praktek', 'praktik'],
-      ['jadual', 'jadwal'],
-      ['survey', 'survei'],
-      ['sekedar', 'sekadar']
-    ];
-    SPECIFIC_CORRECTIONS.forEach(([typo, correction]) => {
-      typoCorrectionMap.set(typo, correction);
-    });
-
-    // 1. Recursive Morphological Parser (Indonesian Stemmer / Decomposer)
-    const checkWordValidWithMorphology = (w: string, validSet: Set<string>): { isValid: boolean; stem?: string } => {
-      const wClean = w.toLowerCase().trim();
-      if (validSet.has(wClean)) {
-        return { isValid: true, stem: wClean };
-      }
-
-      // Check hyphenated / double words (e.g., "buku-buku", "anak-anak", "mobil-mobilan")
-      if (wClean.includes('-')) {
-        const parts = wClean.split('-');
-        const partChecks = parts.map(p => checkWordValidWithMorphology(p, validSet));
-        if (partChecks.every(pc => pc.isValid)) {
-          return { isValid: true, stem: wClean };
-        }
-      }
-
-      // a) Strip clitics (from trailing end)
-      const clitics = ['nya', 'lah', 'kah', 'pun', 'ku', 'mu'];
-      for (const clitic of clitics) {
-        if (wClean.endsWith(clitic) && wClean.length > clitic.length + 2) {
-          const stripped = wClean.slice(0, -clitic.length);
-          if (validSet.has(stripped)) {
-            return { isValid: true, stem: stripped };
-          }
-          const sub = checkWordValidWithMorphology(stripped, validSet);
-          if (sub.isValid) {
-            return { isValid: true, stem: sub.stem };
-          }
-        }
-      }
-
-      // b) Strip standard suffixes
-      const suffixes = ['kan', 'an', 'i'];
-      for (const suffix of suffixes) {
-        if (wClean.endsWith(suffix) && wClean.length > suffix.length + 2) {
-          const stripped = wClean.slice(0, -suffix.length);
-          if (validSet.has(stripped)) {
-            return { isValid: true, stem: stripped };
-          }
-          const sub = checkWordValidWithMorphology(stripped, validSet);
-          if (sub.isValid) {
-            return { isValid: true, stem: sub.stem };
-          }
-        }
-      }
-
-      // c) Strip simple passive & aspectual prefixes (di-, ter-, se-, ke-)
-      const simplePrefixes = ['di', 'ter', 'se', 'ke'];
-      for (const pref of simplePrefixes) {
-        if (wClean.startsWith(pref) && wClean.length > pref.length + 2) {
-          const stripped = wClean.slice(pref.length);
-          if (validSet.has(stripped)) {
-            return { isValid: true, stem: stripped };
-          }
-          const sub = checkWordValidWithMorphology(stripped, validSet);
-          if (sub.isValid) {
-            return { isValid: true, stem: sub.stem };
-          }
-        }
-      }
-
-      // d) Strip ber- / be- / bel- prefixes
-      if (wClean.startsWith('ber') && wClean.length > 5) {
-        const stripped = wClean.slice(3);
-        if (validSet.has(stripped)) return { isValid: true, stem: stripped };
-        const sub = checkWordValidWithMorphology(stripped, validSet);
-        if (sub.isValid) return { isValid: true, stem: sub.stem };
-      }
-      if (wClean.startsWith('be') && wClean.length > 4) {
-        const stripped = wClean.slice(2);
-        if (validSet.has(stripped)) return { isValid: true, stem: stripped };
-        const sub = checkWordValidWithMorphology(stripped, validSet);
-        if (sub.isValid) return { isValid: true, stem: sub.stem };
-      }
-      if (wClean.startsWith('bel') && wClean.length > 5) {
-        const stripped = wClean.slice(3);
-        if (validSet.has(stripped)) return { isValid: true, stem: stripped };
-        const sub = checkWordValidWithMorphology(stripped, validSet);
-        if (sub.isValid) return { isValid: true, stem: sub.stem };
-      }
-
-      // e) Strip active nasal prefixes (me-, pe-) with morphophonemic rules
-      const nasals = ['me', 'pe'];
-      for (const n of nasals) {
-        if (wClean.startsWith(n) && wClean.length > n.length + 2) {
-          const base = wClean.slice(n.length);
-
-          if (base.startsWith('nge') && base.length > 3) {
-            const stripped = base.slice(3);
-            if (validSet.has(stripped)) return { isValid: true, stem: stripped };
-          }
-
-          if (base.startsWith('ny') && base.length > 2) {
-            const withS = 's' + base.slice(2);
-            if (validSet.has(withS)) return { isValid: true, stem: withS };
-            const sub = checkWordValidWithMorphology(withS, validSet);
-            if (sub.isValid) return { isValid: true, stem: sub.stem };
-          }
-
-          if (base.startsWith('m') && base.length > 1) {
-            const withP = 'p' + base.slice(1);
-            if (validSet.has(withP)) return { isValid: true, stem: withP };
-            const sub1 = checkWordValidWithMorphology(withP, validSet);
-            if (sub1.isValid) return { isValid: true, stem: sub1.stem };
-
-            const plainM = base;
-            if (validSet.has(plainM)) return { isValid: true, stem: plainM };
-            const sub2 = checkWordValidWithMorphology(plainM, validSet);
-            if (sub2.isValid) return { isValid: true, stem: sub2.stem };
-          }
-
-          if (base.startsWith('n') && base.length > 1) {
-            const withT = 't' + base.slice(1);
-            if (validSet.has(withT)) return { isValid: true, stem: withT };
-            const sub1 = checkWordValidWithMorphology(withT, validSet);
-            if (sub1.isValid) return { isValid: true, stem: sub1.stem };
-
-            const plainN = base;
-            if (validSet.has(plainN)) return { isValid: true, stem: plainN };
-            const sub2 = checkWordValidWithMorphology(plainN, validSet);
-            if (sub2.isValid) return { isValid: true, stem: sub2.stem };
-          }
-
-          if (base.startsWith('ng') && base.length > 2) {
-            const withK = 'k' + base.slice(2);
-            if (validSet.has(withK)) return { isValid: true, stem: withK };
-            const sub1 = checkWordValidWithMorphology(withK, validSet);
-            if (sub1.isValid) return { isValid: true, stem: sub1.stem };
-
-            const plainNg = base;
-            if (validSet.has(plainNg)) return { isValid: true, stem: plainNg };
-            const sub2 = checkWordValidWithMorphology(plainNg, validSet);
-            if (sub2.isValid) return { isValid: true, stem: sub2.stem };
-          }
-
-          const singleMe = base;
-          if (validSet.has(singleMe)) return { isValid: true, stem: singleMe };
-          const sub = checkWordValidWithMorphology(singleMe, validSet);
-          if (sub.isValid) return { isValid: true, stem: sub.stem };
-        }
-      }
-
-      return { isValid: false };
-    };
-
-    // Parse POS category dynamically based on morphological extensions
-    const deriveCategory = (wordStr: string): string => {
-      const clean = wordStr.toLowerCase().trim();
-      if (rootCategories.has(clean)) {
-        return rootCategories.get(clean)!;
-      }
-      const morph = checkWordValidWithMorphology(clean, validWordsSet);
-      if (morph.isValid && morph.stem) {
-        const rootCat = rootCategories.get(morph.stem) || 'Nomina';
-        if (clean.endsWith('an') || clean.startsWith('pe') || (clean.startsWith('ke') && clean.endsWith('an'))) {
-          return 'Nomina';
-        }
-        if (clean.startsWith('me') || clean.startsWith('di') || clean.startsWith('ter')) {
-          return 'Verba';
-        }
-        return rootCat;
-      }
-      return 'Lainnya';
-    };
-
-    // Handle tokenization preserving spaces & formatting
-    const tokens = rawText.split(/([a-zA-ZáéíóúÁÉÍÓÚ'-]+)/);
-    
-    // Build actual word tokens info list
-    interface WordTokenInfo {
-      tokenIndex: number;
-      text: string;
-      stripped: string;
-      isCapitalized: boolean;
-      isAllCaps: boolean;
-    }
-    const wordTokens: WordTokenInfo[] = [];
-    tokens.forEach((token, idx) => {
-      const isWord = /^[a-zA-ZáéíóúÁÉÍÓÚ'-]+$/.test(token) && token.length > 1;
-      if (isWord) {
-        wordTokens.push({
-          tokenIndex: idx,
-          text: token,
-          stripped: token.toLowerCase(),
-          isCapitalized: token[0] === token[0].toUpperCase(),
-          isAllCaps: token === token.toUpperCase()
-        });
-      }
-    });
-
-    const wordTokenIdxMap = new Map<number, number>();
-    wordTokens.forEach((wt, i) => {
-      wordTokenIdxMap.set(wt.tokenIndex, i);
-    });
-
-    // Helper functions for sentence context checks
-    const isSentenceStart = (wtIndex: number): boolean => {
-      if (wtIndex === 0) return true;
-      const prevWt = wordTokens[wtIndex - 1];
-      const wt = wordTokens[wtIndex];
-      for (let j = prevWt.tokenIndex + 1; j < wt.tokenIndex; j++) {
-        if (tokens[j].includes('.') || tokens[j].includes('!') || tokens[j].includes('?')) {
-          return true;
-        }
-      }
-      return false;
-    };
-
-    const getGrammaticalExpectations = (wtIndex: number): string[] => {
-      const expected: string[] = [];
-      const prevWt = wtIndex > 0 ? wordTokens[wtIndex - 1] : null;
-      if (prevWt) {
-        const prevClean = prevWt.stripped;
-        const prevCat = deriveCategory(prevClean);
-
-        const indonesianPrepositions = ['di', 'ke', 'dari', 'pada', 'bagi', 'oleh', 'untuk', 'tentang', 'sebagai', 'dalam', 'atas', 'bawah'];
-        if (indonesianPrepositions.includes(prevClean) || prevCat === 'Preposisi') {
-          expected.push('Nomina', 'Pronomina');
-        }
-
-        const indonesianAdverbs = ['sangat', 'amat', 'sekali', 'lebih', 'paling', 'agak', 'begitu', 'terlalu', 'kurang'];
-        if (indonesianAdverbs.includes(prevClean) || prevCat === 'Adverba') {
-          expected.push('Adjektiva', 'Verba');
-        }
-
-        const indonesianAuxiliaries = ['sedang', 'akan', 'telah', 'sudah', 'bisa', 'dapat', 'boleh', 'harus', 'ingin', 'mau', 'belum', 'tidak', 'jangan'];
-        if (indonesianAuxiliaries.includes(prevClean)) {
-          expected.push('Verba', 'Adjektiva');
-        }
-      }
-      return expected;
-    };
-
-    const results: CheckedWord[] = tokens.map((token, idx) => {
-      if (!wordTokenIdxMap.has(idx)) {
-        return { text: token, isWord: false, isTypo: false };
-      }
-
-      const wtIdx = wordTokenIdxMap.get(idx)!;
-      const wt = wordTokens[wtIdx];
-      const stripped = wt.stripped;
-
-      // 1. Check for database mapped direct typos
-      const databaseCorrection = typoCorrectionMap.get(stripped);
-
-      // 2. Morphology verification to avoid incorrect flags
-      const morphResult = checkWordValidWithMorphology(stripped, validWordsSet);
-      const isWordStandard = morphResult.isValid;
-
-      // 3. Proper Noun check
-      const startSentence = isSentenceStart(wtIdx);
-      let isProperNoun = false;
-      if (wt.isCapitalized) {
-        if (!startSentence) {
-          isProperNoun = true;
-        } else {
-          // At sentence start, if accompanied by another capitalized word, it is likely a proper noun
-          const nextWt = wtIdx < wordTokens.length - 1 ? wordTokens[wtIdx + 1] : null;
-          if (nextWt && nextWt.isCapitalized) {
-            isProperNoun = true;
-          }
-        }
-      }
-
-      let isTypo = false;
-      let finalBestSuggestion: string | undefined = undefined;
-      let finalSuggestions: string[] = [];
-
-      if (databaseCorrection) {
-        isTypo = true;
-        finalBestSuggestion = databaseCorrection;
-        finalSuggestions = [databaseCorrection];
-      } else if (!isWordStandard && !isProperNoun) {
-        isTypo = true;
-        
-        // Contextual grammatical expectation for spelling correction
-        const expectedCategories = getGrammaticalExpectations(wtIdx);
-
-        // Find recommendations
-        const candidates: { word: string; dist: number }[] = [];
-        validWordsSet.forEach(vWord => {
-          if (Math.abs(vWord.length - stripped.length) <= 3) {
-            const dist = getDistance(stripped, vWord);
-            if (dist <= 3) {
-              candidates.push({ word: vWord, dist });
-            }
-          }
-        });
-
-        // Rank search suggestions so grammatically expected speech fits best!
-        candidates.sort((x, y) => {
-          const xCat = deriveCategory(x.word);
-          const yCat = deriveCategory(y.word);
-          const xFitsContext = expectedCategories.includes(xCat);
-          const yFitsContext = expectedCategories.includes(yCat);
-
-          if (xFitsContext && !yFitsContext) return -1;
-          if (!xFitsContext && yFitsContext) return 1;
-
-          if (x.dist !== y.dist) return x.dist - y.dist;
-          return Math.abs(x.word.length - stripped.length) - Math.abs(y.word.length - stripped.length);
-        });
-
-        const listSugg = candidates.slice(0, 3).map(c => {
-          if (token === token.toUpperCase()) {
-            return c.word.toUpperCase();
-          } else if (token[0] === token[0].toUpperCase()) {
-            return c.word.charAt(0).toUpperCase() + c.word.slice(1);
-          }
-          return c.word;
-        });
-
-        finalBestSuggestion = listSugg[0] || undefined;
-        finalSuggestions = listSugg;
-      }
-
-      // Reapply visual casing to best correction
-      if (isTypo && finalBestSuggestion) {
-        const uppercaseBest = token === token.toUpperCase();
-        const capitalizedBest = token[0] === token[0].toUpperCase() && token !== token.toLowerCase();
-
-        finalSuggestions = finalSuggestions.map(s => {
-          if (uppercaseBest) return s.toUpperCase();
-          if (capitalizedBest) return s.charAt(0).toUpperCase() + s.slice(1);
-          return s;
-        });
-
-        if (uppercaseBest) {
-          finalBestSuggestion = finalBestSuggestion.toUpperCase();
-        } else if (capitalizedBest) {
-          finalBestSuggestion = finalBestSuggestion.charAt(0).toUpperCase() + finalBestSuggestion.slice(1);
-        }
-      }
-
-      let severity: 'Low' | 'Medium' | 'High' | undefined = undefined;
-      if (isTypo) {
-        const dist = finalBestSuggestion ? getDistance(stripped, finalBestSuggestion.toLowerCase()) : 3;
-        if (dist <= 1) {
-          severity = 'Low';
-        } else if (dist === 2) {
-          severity = 'Medium';
-        } else {
-          severity = 'High';
-        }
-      }
-
-      return {
-        text: token,
-        isWord: true,
-        isTypo: isTypo,
-        bestSuggestion: finalBestSuggestion,
-        suggestions: finalSuggestions,
-        severity: severity
-      };
-    });
-
-    setCheckedResults(results);
-    setIsAnalyzing(false);
-    setSelectedWordIdx(null);
   };
 
   // Auto Correct All
@@ -2343,6 +2219,7 @@ function MainApp() {
   }, []);
 
   // Excel Export Template
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const downloadTemplate = () => {
     const templateData = [
       ["Kata", "Kategori", "Etimologi", "Definisi", "Contoh Kalimat", "Jumlah Pencarian"],
@@ -2428,18 +2305,18 @@ function MainApp() {
         const data = XLSX.utils.sheet_to_json(ws, { header: 1 }) as any[][];
 
         // Validasi header (baris pertama)
-        // A: Kata, B: Kategori, C: Etimologi, D: Definisi, E: Contoh Kalimat, F: Jumlah Pencarian
-        const validRows = data.slice(1).filter(row => row[0] && row[3]); // Minimal ada kata dan definisi
+        // Kolom A (Indeks 0): Dianggap sebagai "Kata" (kosakata utama). Kolom ini wajib terisi.
+        const validRows = data.slice(1).filter(row => row && row[0] && String(row[0]).trim() !== '');
         
         let successCount = 0;
         for (const row of validRows) {
           const word = String(row[0]).trim();
-          const category = String(row[1] || 'Nomina').trim();
-          const etymology = String(row[2] || '').trim();
-          const definition = String(row[3]).trim();
+          const category = row[1] ? String(row[1]).trim() : 'Nomina';
+          const etymology = row[2] ? String(row[2]).trim() : '';
+          const definition = row[3] ? String(row[3]).trim() : '';
           // Contoh kalimat dipisahkan dengan titik koma (;)
-          const examples = row[4] ? String(row[4]).split(';').map(s => s.trim()) : [];
-          const searchCount = row[5] ? Number(row[5]) : 0;
+          const examples = row[4] ? String(row[4]).split(';').map(s => s.trim()).filter(Boolean) : [];
+          const searchCount = row[5] ? Number(row[5]) || 0 : 0;
           
           const wordEntry: WordEntry = {
             word,
@@ -2469,7 +2346,7 @@ function MainApp() {
         setError(null);
       } catch (err) {
         console.error(err);
-        setError("Gagal membaca file Excel. Pastikan format kolom sesuai: Kata, Kategori, Etimologi, Definisi, Contoh Kalimat, Jumlah Pencarian.");
+        setError("Gagal membaca file Excel. Pastikan kolom pertama (Kolom A) adalah Kata/Lema (Wajib terisi).");
       } finally {
         setIsProcessing(false);
         if (fileInputRef.current) fileInputRef.current.value = '';
@@ -2845,21 +2722,21 @@ function MainApp() {
       showStatus("Basis data tidak tersedia.", "error");
       return;
     }
-    if (!excelMapping.word || !excelMapping.definition) {
-      showStatus("Kolom 'Kata' dan 'Definisi' wajib dipetakan.", "error");
+    if (!excelMapping.word) {
+      showStatus("Kolom 'Kata' wajib dipetakan.", "error");
       return;
     }
 
     const wordIdx = excelColumns.indexOf(excelMapping.word);
-    const defIdx = excelColumns.indexOf(excelMapping.definition);
+    const defIdx = excelMapping.definition ? excelColumns.indexOf(excelMapping.definition) : -1;
     const catIdx = excelMapping.category ? excelColumns.indexOf(excelMapping.category) : -1;
     const etyIdx = excelMapping.etymology ? excelColumns.indexOf(excelMapping.etymology) : -1;
     const exIdx = excelMapping.examples ? excelColumns.indexOf(excelMapping.examples) : -1;
     const scIdx = excelMapping.searchCount ? excelColumns.indexOf(excelMapping.searchCount) : -1;
 
-    const validRows = excelRows.filter(row => row[wordIdx] && row[defIdx]);
+    const validRows = excelRows.filter(row => row[wordIdx] && String(row[wordIdx]).trim() !== '');
     if (validRows.length === 0) {
-      showStatus("Tidak ditemukan data valid yang berisi Kata dan Definisi.", "error");
+      showStatus("Tidak ditemukan data valid yang berisi Kata.", "error");
       return;
     }
 
@@ -2874,7 +2751,7 @@ function MainApp() {
         const wordStr = String(row[wordIdx]).trim();
         const categoryStr = catIdx !== -1 && row[catIdx] ? String(row[catIdx]).trim() : "Nomina";
         const etymologyStr = etyIdx !== -1 && row[etyIdx] ? String(row[etyIdx]).trim() : "";
-        const definitionStr = String(row[defIdx]).trim();
+        const definitionStr = defIdx !== -1 && row[defIdx] ? String(row[defIdx]).trim() : "";
         const examplesArr = exIdx !== -1 && row[exIdx] ? String(row[exIdx]).split(';').map(s => s.trim()).filter(Boolean) : [];
         const searchCountNum = scIdx !== -1 && row[scIdx] ? Number(row[scIdx]) || 0 : 0;
 
@@ -3224,6 +3101,7 @@ function MainApp() {
     localStorage.removeItem('kamus_history');
   };
 
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const removeFromHistory = (word: string) => {
     setHistory(prev => prev.filter(item => item !== word));
   };
@@ -5088,7 +4966,7 @@ function MainApp() {
                           <p>Database kamus utama menyimpan skema sebagai berikut:</p>
                           <ul className="list-disc pl-4 space-y-1">
                             <li><strong>Kata</strong> (Wajib): Kosakata baku / kata masukan</li>
-                            <li><strong>Definisi</strong> (Wajib): Arti penjelasan sesuai kamus ekstensif</li>
+                            <li><strong>Definisi</strong> (Opsional): Arti penjelasan sesuai kamus ekstensif</li>
                             <li><strong>Kategori</strong> (Opsional): Misalnya Nomina, Verba, Adjektiva, dll. (Default: Nomina)</li>
                             <li><strong>Etimologi</strong> (Opsional): Jejak asal-usul kata serapan bahasa</li>
                             <li><strong>Contoh Kalimat</strong> (Opsional): Contoh tertulis. Pisahkan multi-kalimat dengan tanda titik koma (<code>;</code>)</li>
@@ -5131,7 +5009,7 @@ function MainApp() {
 
                         {/* Definition mapping */}
                         <div className="space-y-1">
-                          <label className="block text-[10px] font-sans font-bold uppercase tracking-widest text-gray-500 font-sans">Kolom Definisi / Makna (Wajib)</label>
+                          <label className="block text-[10px] font-sans font-bold uppercase tracking-widest text-gray-500 font-sans">Kolom Definisi / Makna (Opsional)</label>
                           <select
                             value={excelMapping.definition}
                             onChange={(e) => setExcelMapping(prev => ({ ...prev, definition: e.target.value }))}
